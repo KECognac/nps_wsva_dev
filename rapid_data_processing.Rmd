@@ -72,6 +72,8 @@ imap(sort(unique(parks$UNIT_CODE)), ~{
 })
 ```
 
+Note: parks without centroid climate data will just be empty. Add a way to pull a list of all missing data parks
+
 
 Test running selection function with pre-pulled centroid climate data
 ```{r}
