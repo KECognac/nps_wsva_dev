@@ -1,0 +1,83 @@
+---
+title: "rapid_data_processing"
+output: html_document
+---
+
+# Pre-processing large datasets for Rapid workflow
+
+This workflow includes importing and organizing of large datasets for the rapid workflow to allow for quick re-runs of the rapid reports.
+
+```{r}
+source("setup.R")
+```
+
+# Create File Structure
+
+First get list of all park names
+```{r}
+# get a list of all park names and filtered park list
+
+#download a list of all park names and attributes
+parks <- getParkSystem()
+
+# clean file and join to list that has region codes
+parks_filtered <- parks %>%
+  st_drop_geometry() %>%
+  # remove non  conus
+  filter(!STATE %in% c("AK", "AS", "HI", "MP", "PR", "VI")) %>%
+  distinct(STATE, UNIT_CODE)
+
+# tie to unit list to get region code
+nps_list <- readxl::read_xlsx("data/NPS-Unit-List.xlsx") %>% 
+  # remove first row metadata
+  slice(-1) %>% 
+  janitor::clean_names() %>% 
+  dplyr::select(UNIT_CODE = park_code, region) %>% 
+  distinct() %>% 
+  inner_join(parks_filtered, by = "UNIT_CODE")
+```
+
+Now create folders if they don't already exist
+```{r}
+if(!dir.exists("data/rapid")) {
+  dir.create("data/rapid")
+}
+
+# folder for conus or US wide data
+if(!dir.exists("data/rapid/all")) {
+  dir.create("data/rapid/all")
+}
+
+# folders for each park code
+walk(sort(parks$UNIT_CODE), function(x){
+  if(!dir.exists(paste0("data/rapid/", x))) {
+    dir.create(paste0("data/rapid/", x))
+  }
+})
+
+```
+
+
+## Centroid Climate Data
+
+Pull and save centroid climate data for all parks
+```{r}
+# initiate error handling
+saferun <- safely(.f = get_centroid_climate_data)
+
+# track progress
+imap(sort(unique(parks$UNIT_CODE)), ~{
+  message(glue::glue("Processing {.y} of {length(unique(parks$UNIT_CODE))}: {.x}"))
+  saferun(park = .x, save = TRUE, path = "data/rapid")
+})
+```
+
+
+Test running selection function with pre-pulled centroid climate data
+```{r}
+get_centroid_climate_data("BRCA", save = TRUE, path = "data/rapid")
+
+test <- select_cfs_rapid(park = "BRCA", region = "SWR", pull_data = FALSE,
+                         to_plot = TRUE, save = TRUE, path = "data/rapid")
+```
+
