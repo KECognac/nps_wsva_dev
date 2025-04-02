@@ -21,7 +21,7 @@ Read in water supply database for filtered parks
 ```{r}
 table_path <- "data/Water_Supply_Systems/NPS_Water_Systems_Database_Joined.xlsx"
 
-water_supplies <- read_excel(table_path, sheet = 1, na = "NA", skip = 1) %>%
+water_supplies <- read_excel(table_path, sheet = 1, na = c("NA","U"), skip = 1) %>%
   as.data.frame() %>%
       dplyr::filter(park_unit %in% park_sub$UNIT_CODE) %>%
      drop_na(source_longitude, source_longitude) %>%
