@@ -75,7 +75,7 @@ imap(sort(unique(parks$UNIT_CODE)), ~{
 
 Test running selection function with pre-pulled centroid climate data
 ```{r}
-get_centroid_climate_data("BRCA", save = TRUE, path = "data/rapid")
+get_centroid_climate_data("ARCH", save = TRUE, path = "data/rapid")
 
 test <- select_cfs_rapid(park = "BRCA", region = "SWR", pull_data = FALSE,
                          to_plot = TRUE, save = TRUE, path = "data/rapid")
