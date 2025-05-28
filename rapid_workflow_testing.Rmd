@@ -12,7 +12,7 @@ Read in park system
 park_system <- getParkSystem()
 ```
 
-Filter for testing
+Filter to Utah parks for testing
 ```{r}
 park_sub <- park_system %>% filter(STATE == "UT")
 ```
@@ -30,14 +30,42 @@ water_supplies <- read_excel(table_path, sheet = 1, na = c("NA","U"), skip = 1) 
             remove = FALSE)
 ```
 
+For each water supply point, calculate indicator at point + 5km buffer
 
-Climate data for each point? Or aoi....
+# Exposure
+
+## Fire
+Increase in likelihood of fires
 ```{r}
-# split sf dataframe into unique sf object list
-# Split each row into its own sf object
-#ws_list <- split(water_supplies, seq_len(nrow(water_supplies)))
-
-water_supply_aois <- get_aoi_source(water_supplies)
 
 ```
 
+
+
+# Sensititity
+
+## Fire
+
+Wildfire hazard potential
+```{r}
+# Read in and clean shared datasets
+
+## CONUS pyromes
+pyromes <- st_read("data/all/usfs_fire/Pyromes-RDS-2020-0020/Data/Pyromes_CONUS_20200206.shp") %>% st_make_valid() %>%
+  st_transform(st_crs(water_supplies))
+
+## CONUS continuous WHP
+whp_cnt <- terra::rast("data/all/usfs_fire/whp2023_GeoTIF/whp2023_cnt_conus.tif")
+
+# buffer ws points 
+water_supplies_buffer <- st_buffer(water_supplies, 5000)
+
+# apply function
+fire_sen <- calc_fire_sen(aoi = water_supplies_buffer,
+                          whp_data = whp_cnt,
+                          pyrome_data = pyromes)
+
+# BENCHMARKING
+## 1.91 mins for 23 parks
+
+```
