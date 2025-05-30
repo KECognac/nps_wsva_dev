@@ -60,7 +60,9 @@ walk(sort(parks$UNIT_CODE), function(x){
 
 ## Centroid Climate Data
 
-Pull and save centroid climate data for all parks
+### Pull and save centroid climate data for all parks
+
+**Benchmarking:** This took ~2 hours on a 32BG deskop
 ```{r}
 # initiate error handling
 saferun <- safely(.f = get_centroid_climate_data)
@@ -72,12 +74,21 @@ imap(sort(unique(parks$UNIT_CODE)), ~{
 })
 ```
 
+Note: parks without centroid climate data will just be empty. Add a way to pull a list of all missing data parks
 
-Test running selection function with pre-pulled centroid climate data
+
+Test new functions
 ```{r}
-get_centroid_climate_data("BRCA", save = TRUE, path = "data/rapid")
+# with saving
+get_centroid_climate_data("ARCH", save = TRUE, path = "data/rapid")
 
 test <- select_cfs_rapid(park = "BRCA", region = "SWR", pull_data = FALSE,
                          to_plot = TRUE, save = TRUE, path = "data/rapid")
+
+# wihtout saving
+get_centroid_climate_data("VALL", save = FALSE)
+
+test2 <- select_cfs_rapid(park = "BRCA", region = "SWR", pull_data = TRUE,
+                         to_plot = TRUE, save = FALSE, path = "data/rapid")
 ```
 
