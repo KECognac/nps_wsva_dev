@@ -123,6 +123,7 @@ fire_exp <- calc_fire_exp(
 
 # BENCHMARK 
 ## 38.45 secs for 23 parks
+## 50.46 MINs for 641 parks
 ```
 
 # Sensitivity
@@ -145,11 +146,13 @@ whp_cnt <- terra::rast("data/all/usfs_fire/whp2023_GeoTIF/whp2023_cnt_conus.tif"
 water_supplies_buffer <- st_buffer(water_supplies, 5000)
 
 # Calculate indicator
-fire_sen <- calc_fire_sen(aoi = water_supplies_buffer,
+fire_sen <- calc_fire_sen(aoi = st_filter(water_supplies_buffer, pyromes),
                           whp_data = whp_cnt,
-                          pyrome_data = pyromes)
+                          pyrome_data = pyromes,
+                          save = TRUE, 
+                          path = "data/rapid/all")
 
 # BENCHMARKING
 ## 1.91 mins for 23 parks
-
+## 54.1 mins for 677 parks
 ```
