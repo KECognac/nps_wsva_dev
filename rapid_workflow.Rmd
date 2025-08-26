@@ -12,7 +12,9 @@ source("setup.R")
 Read in park system
 
 ```{r}
-park_system <- getParkSystem()
+#park_system <- getParkSystem()
+# read in pre-saved park file
+parks <- st_read("data/rapid/all/park_boundaries_2025-08-14.gpkg")
 ```
 
 Read in selected GCMs
@@ -36,15 +38,24 @@ Read in water supply database for filtered parks
 ```{r}
 table_path <- "data/Water_Supply_Systems/NPS_Water_Systems_Database_Joined.xlsx"
 
-water_supplies <- read_excel(table_path, sheet = 1, na = c("NA","U"), skip = 1) %>%
- # as.data.frame() %>%
-  dplyr::mutate(source_longitude = as.numeric(source_longitude),
-                source_latitude = as.numeric(source_latitude)) %>% 
-      #dplyr::filter(park_unit %in% park_sub$UNIT_CODE) %>%
-     drop_na(source_longitude, source_latitude) %>%
-    st_as_sf(coords = (c("source_longitude","source_latitude")),
+
+water_supplies <- read_excel(table_path,
+                             sheet = 1,
+                             na = c("NA", "U"),
+                             skip = 1) %>%
+  dplyr::mutate(
+    source_longitude = as.numeric(source_longitude),
+    source_latitude = as.numeric(source_latitude)
+  ) %>%
+  filter(!state %in% c("AK", "AS", "HI", "MP", "PR", "VI")) %>%
+  filter(!source_type %in% c("Municipal", "Hauled")) %>%
+  drop_na(source_longitude, source_latitude) %>%
+  st_as_sf(coords = (c("source_longitude", "source_latitude")),
            crs = 4326,
-            remove = FALSE)
+           remove = FALSE)
+
+# save for app
+#write_csv(water_supplies, "rapid_app/data/water_supplies.csv")
 ```
 
 For each water supply point, calculate indicator at point + 5km buffer.
@@ -124,6 +135,7 @@ fire_exp <- calc_fire_exp(
 # BENCHMARK 
 ## 38.45 secs for 23 parks
 ## 50.46 MINs for 641 parks
+## 1.2 hours for 1184 parks
 ```
 
 # Sensitivity
@@ -136,8 +148,8 @@ Wildfire hazard potential
 # Read in and clean shared datasets
 
 ## CONUS pyromes
-pyromes <- st_read("data/all/usfs_fire/Pyromes-RDS-2020-0020/Data/Pyromes_CONUS_20200206.shp") %>% st_make_valid() %>%
-  st_transform(st_crs(water_supplies))
+# pyromes <- st_read("data/all/usfs_fire/Pyromes-RDS-2020-0020/Data/Pyromes_CONUS_20200206.shp") %>% st_make_valid() %>%
+#   st_transform(st_crs(water_supplies))
 
 ## CONUS continuous WHP
 whp_cnt <- terra::rast("data/all/usfs_fire/whp2023_GeoTIF/whp2023_cnt_conus.tif")
@@ -146,9 +158,10 @@ whp_cnt <- terra::rast("data/all/usfs_fire/whp2023_GeoTIF/whp2023_cnt_conus.tif"
 water_supplies_buffer <- st_buffer(water_supplies, 5000)
 
 # Calculate indicator
-fire_sen <- calc_fire_sen(aoi = st_filter(water_supplies_buffer, pyromes),
+fire_sen <- calc_fire_sen(aoi = water_supplies_buffer,
+  #aoi = st_filter(water_supplies_buffer, pyromes),
                           whp_data = whp_cnt,
-                          pyrome_data = pyromes,
+                          #pyrome_data = pyromes,
                           save = TRUE, 
                           path = "data/rapid/all")
 
