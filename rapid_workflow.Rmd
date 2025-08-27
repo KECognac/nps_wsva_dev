@@ -55,7 +55,7 @@ water_supplies <- read_excel(table_path,
            remove = FALSE)
 
 # save for app
-#write_csv(water_supplies, "rapid_app/data/water_supplies.csv")
+write_csv(water_supplies, "rapid_app/app_data/water_supplies.csv")
 ```
 
 For each water supply point, calculate indicator at point + 5km buffer.
