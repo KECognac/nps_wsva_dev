@@ -67,7 +67,7 @@ runoff_exp <- runoff_exp %>%
 
 hist <- ggplot(runoff_exp, aes(x = raw_p10_percent_change)) +
   geom_histogram(fill = "black", bins = 30) +
-  labs(x = "Runoff Change (%)") +
+  labs(x = "Runoff Change (%)", y = "Count") +
   theme_bw() +
   theme(panel.grid.minor = element_blank())
 
@@ -107,7 +107,7 @@ ggarrange(hist, vs, dif,
 ```{r, echo = FALSE}
 hist <- ggplot(runoff_exp, aes(x = raw_percent_models_negative)) +
   geom_histogram(fill = "black", bins = 30) +
-  labs(x = "Negative Models (%)") +
+  labs(x = "Negative Models (%)", y = "Count") +
   theme_bw() +
   theme(panel.grid.minor = element_blank())
 
