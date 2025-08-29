@@ -6,7 +6,7 @@ output: html_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(warning = FALSE, message = FALSE, fig.width = 10)
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, fig.width = 13)
 ```
 
 
@@ -37,17 +37,17 @@ runoff_rasters <- list.files("data/all/loca2_mwbm/", full.names = TRUE, pattern 
   .[!grepl("historical", .)]
 ```
 
-Then, we calculate runoff vulnerability score. There are two components to the runoff indicator:
+Then, we calculate the runoff indicator's vulnerability score. There are two components to the runoff indicator:
 
-1) Runoff change "severity": this component is defined as the 10th percentile of projected runoff changes across all climate models for each water supply location. This 10th percentile value is then normalized using min-max scaling, where the minimum and maximum values across all locations are used to rescale the data to a 0-1 range (`maxmin_p10_percent_change`). 
+1) Runoff change "severity": this component is defined as the model closest to the 10th percentile of projected runoff changes across all climate models for each water supply location. This 10th percentile model's value is then normalized using min-max scaling, where the minimum and maximum values across all locations are used to rescale the data to a 0-1 range (`maxmin_p10_percent_change`). 
 
-2) "Consistency" of decreased runoff: this component is defined as the percentage of climate models that project negative runoff changes for each location and applies the same min-max normalization (maxmin_percent_models_negative). 
+2) "Consistency" of decreased runoff: this component is defined as the percentage of climate models that project negative runoff changes for each location and applies the same min-max normalization (`maxmin_percent_models_negative`). 
 
 The final vulnerability score is computed as a weighted average of these two normalized components: 
 
 `maxmin_recharge_vuln = (0.5 * maxmin_p10_percent_change) + (0.5 * maxmin_percent_models_negative)`
 
-This approach gives equal weight to both the severity of the worst-case scenarios (10th percentile) and the consistency of negative projections across models, creating a composite vulnerability index that ranges from 0 to 1, where higher values indicate greater vulnerability to reduced runoff under future climate conditions.
+This approach gives equal weight to both the severity of the worst(ish)-case scenarios (10th percentile) and the consistency of negative projections across models, creating a composite vulnerability index that ranges from 0 to 1, where higher values indicate greater vulnerability to reduced runoff under future climate conditions.
 
 ```{r}
 runoff_exp <- calc_runoff_exp(aoi = water_supplies,
@@ -132,7 +132,7 @@ ggarrange(hist, vs, dif,
 
 ### Overall vulnerability: percentile score vs. normalized score
 
-There appears to be several distinct vulnerability "pathways"; high runoff magnitude and consistency scores, low magnitude and consistency score, one where there's low magnitude but high consistency, and lastly where there's high magnitude but low consistency.
+There appears to be several distinct vulnerability "pathways"; high severity and consistency scores, low severity and consistency score, one where there's low severity but high consistency, and lastly where there's high severity but low consistency.
 
 ```{r, echo = FALSE}
 hist <- ggplot(data = runoff_exp) +
@@ -151,8 +151,8 @@ vs <- ggplot(runoff_exp, aes(x = pcntl_recharge_vuln, y = maxmin_recharge_vuln))
                        values = scales::rescale(c(min(runoff_exp$raw_p10_percent_change, na.rm = TRUE),
                                                   mean(runoff_exp$raw_p10_percent_change, na.rm = TRUE),
                                                   max(runoff_exp$raw_p10_percent_change, na.rm = TRUE))),
-                       name = "Runoff (% change)") +
-  scale_size_binned(name = "Negative Change Models (%)", 
+                       name = "Runoff Change (%)") +
+  scale_size_binned(name = "Negative Models (%)", 
                     range = c(0.01, 10),
                     n.breaks = 5,
                     breaks = c(0, 20, 40, 60, 80, 100)) +
