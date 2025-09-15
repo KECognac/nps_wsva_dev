@@ -1,0 +1,424 @@
+---
+title: "Fire Exposure and Sensitivity Analysis for National Parks"
+author: "Your Name"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    theme: united
+    code_folding: show
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, fig.width = 10, fig.height = 6)
+```
+
+# Overview
+
+This analysis explores fire exposure and sensitivity indicators for national parks, examining the distribution of values, comparing different scaling approaches (normalized vs. ranked), and evaluating transformation methods.
+
+## Load Libraries and Data
+
+```{r load-libraries}
+library(tidyverse)
+library(readxl)
+library(corrplot)
+library(ggplot2)
+library(gridExtra)
+library(knitr)
+library(DT)
+library(plotly)
+
+# Load the datasets
+fire_exposure <- read_csv("data/rapid/all/fire_exposure_2025-09-09.csv")
+fire_sensitivity <- read_csv("data/rapid/all/fire_sensitivity_2025-09-09.csv")
+
+```
+
+## Data Overview
+
+```{r data-overview}
+# Basic info about datasets
+cat("Fire Exposure Dataset:\n")
+cat("Dimensions:", dim(fire_exposure), "\n")
+cat("Parks:", n_distinct(fire_exposure$park_name), "\n\n")
+
+cat("Fire Sensitivity Dataset:\n") 
+cat("Dimensions:", dim(fire_sensitivity), "\n")
+cat("Parks:", n_distinct(fire_sensitivity$park_name), "\n\n")
+
+# Check for overlapping parks
+common_parks <- intersect(fire_exposure$park_name, fire_sensitivity$park_name)
+cat("Common parks between datasets:", length(common_parks), "\n")
+```
+
+```{r data-preview}
+# Preview the datasets
+kable(head(fire_exposure), caption = "Fire Exposure Data (First 6 rows)")
+kable(head(fire_sensitivity), caption = "Fire Sensitivity Data (First 6 rows)")
+```
+
+# Fire Exposure Analysis
+
+## Distribution Analysis
+
+```{r fire-exposure-distributions}
+# Raw probability changes
+raw_cols <- fire_exposure %>% select(contains("raw_fire_prob"))
+norm_cols <- fire_exposure %>% select(contains("norm_fire_prob"))
+
+# Create long format for plotting
+exposure_long <- fire_exposure %>%
+  select(park_name, contains("fire_prob_change")) %>%
+  pivot_longer(cols = -park_name, names_to = "indicator", values_to = "value") %>%
+  mutate(
+    percentile = str_extract(indicator, "p\\d+"),
+    type = case_when(
+      str_detect(indicator, "raw_") ~ "Raw Values",
+      str_detect(indicator, "norm_") ~ "Normalized",
+      str_detect(indicator, "rank_") ~ "Ranked"
+    )
+  )
+
+# Distribution plots
+p1 <- exposure_long %>%
+  filter(type == "Raw Values") %>%
+  ggplot(aes(x = value, fill = percentile)) +
+  geom_histogram(bins = 30, alpha = 0.7) +
+  facet_wrap(~percentile, scales = "free") +
+  labs(title = "Distribution of Raw Fire Probability Changes",
+       x = "Raw Fire Probability Change", y = "Count") +
+  theme_minimal()
+
+p2 <- exposure_long %>%
+  filter(type == "Normalized") %>%
+  ggplot(aes(x = value, fill = percentile)) +
+  geom_histogram(bins = 30, alpha = 0.7) +
+  facet_wrap(~percentile, scales = "free") +
+  labs(title = "Distribution of Normalized Fire Probability Changes",
+       x = "Normalized Fire Probability Change", y = "Count") +
+  theme_minimal()
+
+grid.arrange(p1, p2, ncol = 1)
+```
+
+## Comparison: Raw vs Normalized vs Ranked
+
+```{r exposure-comparison}
+# Summary statistics
+exposure_summary <- fire_exposure %>%
+  select(contains("fire_prob_change")) %>%
+  summary()
+
+print(exposure_summary)
+
+# Correlation between raw and normalized values
+cor_matrix_p50 <- fire_exposure %>%
+  select(raw_fire_prob_change_p50, norm_fire_prob_change_p50, rank_fire_prob_change_p50) %>%
+  cor(use = "complete.obs")
+
+corrplot(cor_matrix_p50, method = "color", 
+         title = "Correlation: Raw vs Normalized vs Ranked (P50)",
+         mar = c(0,0,0,0))
+```
+
+```{r exposure-scatter}
+# Scatter plots comparing scaling methods
+p3 <- ggplot(fire_exposure, aes(x = raw_fire_prob_change_p50, y = norm_fire_prob_change_p50)) +
+  geom_point(alpha = 0.6) +
+  geom_smooth(method = "lm", color = "red") +
+  labs(title = "Raw vs Normalized Fire Probability Change (P50)",
+       x = "Raw Values", y = "Normalized Values") +
+  theme_minimal()
+
+p4 <- ggplot(fire_exposure, aes(x = norm_fire_prob_change_p50, y = rank_fire_prob_change_p50)) +
+  geom_point(alpha = 0.6) +
+  geom_smooth(method = "lm", color = "red") +
+  labs(title = "Normalized vs Ranked Fire Probability Change (P50)",
+       x = "Normalized Values", y = "Ranked Values") +
+  theme_minimal()
+
+grid.arrange(p3, p4, ncol = 1)
+```
+
+## Percentile Comparison
+
+```{r percentile-analysis}
+# Compare across percentiles
+percentile_cor <- fire_exposure %>%
+  select(contains("raw_fire_prob")) %>%
+  cor(use = "complete.obs")
+
+corrplot(percentile_cor, method = "color",
+         title = "Correlation Between Fire Probability Percentiles (Raw Values)",
+         mar = c(0,0,2,0))
+
+# Box plots by percentile
+exposure_long %>%
+  filter(type == "Raw Values") %>%
+  ggplot(aes(x = percentile, y = value, fill = percentile)) +
+  geom_boxplot() +
+  labs(title = "Fire Probability Change Distribution by Percentile",
+       x = "Percentile", y = "Raw Fire Probability Change") +
+  theme_minimal()
+```
+
+# Fire Sensitivity Analysis
+
+## Distribution Analysis
+
+```{r fire-sensitivity-distributions}
+# Distribution of wildfire hazard
+sens_long <- fire_sensitivity %>%
+  select(park_name, contains("wildfire_hazard")) %>%
+  pivot_longer(cols = -park_name, names_to = "indicator", values_to = "value") %>%
+  mutate(
+    type = case_when(
+      str_detect(indicator, "raw_") ~ "Raw Values",
+      str_detect(indicator, "norm_") ~ "Normalized", 
+      str_detect(indicator, "rank_") ~ "Ranked"
+    )
+  )
+
+# Distribution plots
+sens_long %>%
+  ggplot(aes(x = value, fill = type)) +
+  geom_histogram(bins = 30, alpha = 0.7) +
+  facet_wrap(~type, scales = "free") +
+  labs(title = "Distribution of Wildfire Hazard by Scaling Method",
+       x = "Wildfire Hazard Value", y = "Count") +
+  theme_minimal()
+```
+
+```{r sensitivity-comparison}
+# Summary statistics
+sensitivity_summary <- fire_sensitivity %>%
+  select(contains("wildfire_hazard")) %>%
+  summary()
+
+print(sensitivity_summary)
+
+# Correlation between scaling methods
+sens_cor <- fire_sensitivity %>%
+  select(contains("wildfire_hazard")) %>%
+  cor(use = "complete.obs")
+
+corrplot(sens_cor, method = "color",
+         title = "Correlation: Raw vs Normalized vs Ranked Wildfire Hazard",
+         mar = c(0,0,2,0))
+```
+
+# Combined Analysis
+
+## Join Datasets
+
+```{r combine-datasets}
+# Join the datasets
+combined_data <- fire_exposure %>%
+  full_join(fire_sensitivity, by = c("wsd_source_id", "park_unit", "park_name")) %>%
+  filter(!is.na(raw_fire_prob_change_p50) & !is.na(raw_wildfire_hazard_mean))
+
+cat("Combined dataset dimensions:", dim(combined_data), "\n")
+cat("Parks with both exposure and sensitivity data:", n_distinct(combined_data$park_name), "\n")
+```
+
+## Exposure vs Sensitivity Relationship
+
+```{r exposure-sensitivity-relationship}
+# Scatter plot of exposure vs sensitivity
+p5 <- ggplot(combined_data, aes(x = raw_wildfire_hazard_mean, y = raw_fire_prob_change_p50)) +
+  geom_point(alpha = 0.6) +
+  geom_smooth(method = "lm", color = "red") +
+  labs(title = "Fire Exposure vs Fire Sensitivity (Raw Values)",
+       x = "Raw Wildfire Hazard (Sensitivity)", 
+       y = "Raw Fire Probability Change P50 (Exposure)") +
+  theme_minimal()
+
+# Same plot with normalized values
+p6 <- ggplot(combined_data, aes(x = norm_wildfire_hazard_mean, y = norm_fire_prob_change_p50)) +
+  geom_point(alpha = 0.6) +
+  geom_smooth(method = "lm", color = "red") +
+  labs(title = "Fire Exposure vs Fire Sensitivity (Normalized Values)",
+       x = "Normalized Wildfire Hazard (Sensitivity)",
+       y = "Normalized Fire Probability Change P50 (Exposure)") +
+  theme_minimal()
+
+grid.arrange(p5, p6, ncol = 1)
+
+# Correlation
+cat("Correlation between exposure and sensitivity:\n")
+cat("Raw values:", cor(combined_data$raw_wildfire_hazard_mean, 
+                      combined_data$raw_fire_prob_change_p50, use = "complete.obs"), "\n")
+cat("Normalized values:", cor(combined_data$norm_wildfire_hazard_mean, 
+                             combined_data$norm_fire_prob_change_p50, use = "complete.obs"), "\n")
+```
+
+# Transformation Assessment
+
+## Assess Data Distributions for Transformation Needs
+
+```{r assess-transformations}
+# Check skewness and consider transformations
+library(e1071)
+
+# Function to assess distribution and suggest transformations
+assess_distribution <- function(data, var_name) {
+  skew <- skewness(data, na.rm = TRUE)
+  kurt <- kurtosis(data, na.rm = TRUE)
+  
+  cat("Variable:", var_name, "\n")
+  cat("Skewness:", round(skew, 3), "\n")
+  cat("Kurtosis:", round(kurt, 3), "\n")
+  
+  if (abs(skew) > 1) {
+    cat("Highly skewed - consider transformation\n")
+  } else if (abs(skew) > 0.5) {
+    cat("Moderately skewed - may benefit from transformation\n")
+  } else {
+    cat("Approximately normal distribution\n")
+  }
+  cat("\n")
+}
+
+# Assess key variables
+assess_distribution(fire_exposure$raw_fire_prob_change_p50, "Fire Exposure P50 (Raw)")
+assess_distribution(fire_sensitivity$raw_wildfire_hazard_mean, "Wildfire Hazard (Raw)")
+```
+
+## Test Alternative Transformations
+
+```{r test-transformations}
+# Test different transformations
+test_var <- fire_exposure$raw_fire_prob_change_p50[!is.na(fire_exposure$raw_fire_prob_change_p50)]
+
+# Handle negative values if present
+if(any(test_var < 0, na.rm = TRUE)) {
+  # Shift to make all values positive for log transformation
+  test_var_shifted <- test_var - min(test_var, na.rm = TRUE) + 1
+  
+  transformations <- data.frame(
+    original = test_var,
+    log_shifted = log(test_var_shifted),
+    sqrt_shifted = sqrt(test_var_shifted),
+    rank = rank(test_var)
+  )
+} else {
+  transformations <- data.frame(
+    original = test_var,
+    log = log(test_var + 1),  # Add 1 to handle zeros
+    sqrt = sqrt(test_var),
+    rank = rank(test_var)
+  )
+}
+
+# Plot transformations
+trans_long <- transformations %>%
+  pivot_longer(everything(), names_to = "transformation", values_to = "value")
+
+ggplot(trans_long, aes(x = value)) +
+  geom_histogram(bins = 30, alpha = 0.7, fill = "steelblue") +
+  facet_wrap(~transformation, scales = "free") +
+  labs(title = "Effect of Different Transformations on Fire Exposure P50",
+       x = "Transformed Value", y = "Count") +
+  theme_minimal()
+
+# Calculate skewness for each transformation
+trans_skewness <- sapply(transformations, function(x) skewness(x, na.rm = TRUE))
+cat("Skewness after transformations:\n")
+print(round(trans_skewness, 3))
+```
+
+# Recommendations
+
+## Summary Statistics Table
+
+```{r summary-table}
+# Create comprehensive summary
+summary_stats <- combined_data %>%
+  select(raw_fire_prob_change_p10, raw_fire_prob_change_p50, raw_fire_prob_change_p90,
+         norm_fire_prob_change_p10, norm_fire_prob_change_p50, norm_fire_prob_change_p90,
+         raw_wildfire_hazard_mean, norm_wildfire_hazard_mean) %>%
+  summarise_all(list(
+    mean = ~mean(., na.rm = TRUE),
+    median = ~median(., na.rm = TRUE),
+    sd = ~sd(., na.rm = TRUE),
+    min = ~min(., na.rm = TRUE),
+    max = ~max(., na.rm = TRUE),
+    skewness = ~skewness(., na.rm = TRUE)
+  )) %>%
+  pivot_longer(everything(), names_to = "variable", values_to = "value") %>%
+  separate(variable, into = c("indicator", "statistic"), sep = "_(?=[^_]*$)") %>%
+  pivot_wider(names_from = statistic, values_from = value)
+
+DT::datatable(summary_stats, options = list(scrollX = TRUE))
+```
+
+## Top and Bottom Parks by Indicator
+
+```{r extreme-parks}
+# Identify parks with extreme values
+top_exposure <- combined_data %>%
+  arrange(desc(raw_fire_prob_change_p50)) %>%
+  slice_head(n = 10) %>%
+  select(park_name, raw_fire_prob_change_p50, norm_fire_prob_change_p50, rank_fire_prob_change_p50)
+
+bottom_exposure <- combined_data %>%
+  arrange(raw_fire_prob_change_p50) %>%
+  slice_head(n = 10) %>%
+  select(park_name, raw_fire_prob_change_p50, norm_fire_prob_change_p50, rank_fire_prob_change_p50)
+
+cat("Top 10 Parks by Fire Exposure (P50):\n")
+kable(top_exposure)
+
+cat("\nBottom 10 Parks by Fire Exposure (P50):\n") 
+kable(bottom_exposure)
+```
+
+# Conclusions and Recommendations
+
+Based on this analysis:
+
+## Key Findings
+
+1. **Distribution Characteristics**: 
+   - Examine the skewness values and distribution plots above to determine if transformations are needed
+   - Compare how well normalized vs ranked scaling preserves relationships
+
+2. **Scaling Method Comparison**:
+   - Correlation analysis shows the relationship between raw, normalized, and ranked values
+   - Consider which method best suits your analytical needs
+
+3. **Exposure vs Sensitivity Relationship**:
+   - Evaluate the correlation between fire exposure and sensitivity indicators
+   - Determine if they measure independent aspects of fire vulnerability
+
+## Recommendations for Indicator Calculation
+
+```{r final-recommendations}
+# Based on the analysis, provide specific recommendations
+cat("RECOMMENDATIONS:\n\n")
+
+cat("1. DATA TRANSFORMATION:\n")
+cat("   - Check skewness values above\n")
+cat("   - If |skewness| > 1, consider log or square root transformation\n")
+cat("   - Ranking may be most robust for highly skewed data\n\n")
+
+cat("2. SCALING METHOD:\n")
+cat("   - Normalized values preserve original scale relationships\n")
+cat("   - Ranked values are more robust to outliers\n")
+cat("   - Consider your intended use case\n\n")
+
+cat("3. PERCENTILE SELECTION:\n")
+cat("   - P50 (median) is most stable\n")
+cat("   - P90 captures extreme risk scenarios\n")
+cat("   - P10 shows lower-bound estimates\n\n")
+
+cat("4. DATA QUALITY:\n")
+cat("   - Check for missing values and outliers\n")
+cat("   - Validate extreme values with domain experts\n")
+```
+
+---
+
+*Analysis completed on `r Sys.Date()`*
