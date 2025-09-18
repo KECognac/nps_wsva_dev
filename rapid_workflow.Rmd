@@ -12,7 +12,7 @@ source("setup.R")
 Read in park system
 
 ```{r}
-#park_system <- getParkSystem()
+park_system <- getParkSystem()
 # read in pre-saved park file
 parks <- st_read("data/rapid/all/park_boundaries_2025-08-14.gpkg")
 ```
@@ -53,7 +53,7 @@ write_csv(water_supplies, "rapid_app/app_data/water_supplies.csv")
 
 Each indicator (or component of multiple indicators) should have its own calculation function in a standalone .R file. Below is a standardized template for indicator functions:
 
-```{r}
+```{r eval = FALSE}
 calc_[indicator]_[type] <- function( 
   water_supplies,           # sf object with water supply locations
   [indicator_data],         # specific data for this indicator
@@ -142,6 +142,16 @@ fire_exp <- calc_fire_exposure(
 ## 38.45 secs for 23 parks
 ## 50.46 MINs for 641 parks
 ## 1.2 hours for 1184 parks
+```
+
+## Runoff
+
+```{r}
+runoff_exp <- calc_runoff_exposure(water_supplies = water_supplies,
+                                   save = TRUE,
+                                   output_dir = "data/rapid/all")
+
+# 23 minutes
 ```
 
 # Sensitivity
@@ -281,4 +291,6 @@ fire_sen <- calc_fire_sensitivity(water_supplies = st_buffer(water_supplies_sub,
 
 ```{r}
 runoff_exp <- calc_runoff_exposure(water_supplies = water_supplies_sub)
+
+# 2.27 mins
 ```
