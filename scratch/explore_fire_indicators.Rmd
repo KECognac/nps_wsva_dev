@@ -381,17 +381,15 @@ Based on this analysis:
 
 ## Key Findings
 
-1. **Distribution Characteristics**: 
-   - Examine the skewness values and distribution plots above to determine if transformations are needed
-   - Compare how well normalized vs ranked scaling preserves relationships
-
-2. **Scaling Method Comparison**:
-   - Correlation analysis shows the relationship between raw, normalized, and ranked values
-   - Consider which method best suits your analytical needs
-
-3. **Exposure vs Sensitivity Relationship**:
-   - Evaluate the correlation between fire exposure and sensitivity indicators
-   - Determine if they measure independent aspects of fire vulnerability
+1.  **Distribution Characteristics**:
+    -   Examine the skewness values and distribution plots above to determine if transformations are needed
+    -   Compare how well normalized vs ranked scaling preserves relationships
+2.  **Scaling Method Comparison**:
+    -   Correlation analysis shows the relationship between raw, normalized, and ranked values
+    -   Consider which method best suits your analytical needs
+3.  **Exposure vs Sensitivity Relationship**:
+    -   Evaluate the correlation between fire exposure and sensitivity indicators
+    -   Determine if they measure independent aspects of fire vulnerability
 
 ## Recommendations for Indicator Calculation
 
@@ -419,6 +417,84 @@ cat("   - Check for missing values and outliers\n")
 cat("   - Validate extreme values with domain experts\n")
 ```
 
----
+------------------------------------------------------------------------
+
+# Compare Fire Sensitivity Methods
+
+```{r}
+fire_old <- read_csv("data/rapid/all/fire_sensitivity_2025-09-09.csv")
+fire_new <- read_csv("data/rapid/all/fire_sensitivity_2025-09-22.csv")
+```
+
+Old Distribution
+
+```{r}
+# Distribution of wildfire hazard
+sens_long_old <- fire_old %>%
+  select(park_name, contains("wildfire_hazard")) %>%
+  pivot_longer(cols = -park_name, names_to = "indicator", values_to = "value") %>%
+  mutate(
+    type = case_when(
+      str_detect(indicator, "raw_") ~ "Raw Values",
+      str_detect(indicator, "norm_") ~ "Normalized", 
+      str_detect(indicator, "rank_") ~ "Ranked"
+    )
+  )
+
+# Distribution plots
+sens_long_old %>%
+  ggplot(aes(x = value, fill = type)) +
+  geom_histogram(bins = 30, alpha = 0.7) +
+  facet_wrap(~type, scales = "free") +
+  labs(title = "Distribution of Wildfire Hazard by Scaling Method",
+       x = "Wildfire Hazard Value", y = "Count") +
+  theme_minimal()
+```
+
+New Distribution
+
+```{r}
+# Distribution of wildfire hazard
+sens_long_new <- fire_new %>%
+  select(park_name, contains("wildfire_hazard")) %>%
+  pivot_longer(cols = -park_name, names_to = "indicator", values_to = "value") %>%
+  mutate(
+    type = case_when(
+      str_detect(indicator, "raw_") ~ "Raw Values",
+      str_detect(indicator, "norm_") ~ "Normalized", 
+      str_detect(indicator, "rank_") ~ "Ranked"
+    )
+  )
+
+# Distribution plots
+sens_long_new %>%
+  ggplot(aes(x = value, fill = type)) +
+  geom_histogram(bins = 30, alpha = 0.7) +
+  facet_wrap(~type, scales = "free") +
+  labs(title = "Distribution of Wildfire Hazard by Scaling Method",
+       x = "Wildfire Hazard Value", y = "Count") +
+  theme_minimal()
+```
+
+New vs. Old
+
+```{r}
+sens_combined <- fire_old %>% 
+  select(wsd_source_id, raw_wildfire_hazard_old = raw_wildfire_hazard_mean,
+         norm_wildfire_hazard_old = norm_wildfire_hazard_mean, rank_wildfire_hazard_old = rank_wildfire_hazard_mean) %>% 
+  left_join(fire_new %>% select(wsd_source_id, raw_wildfire_hazard_new = raw_wildfire_hazard_mean, norm_wildfire_hazard_new = norm_wildfire_hazard_mean,
+                                rank_wildfire_hazard_new = rank_wildfire_hazard_mean))
+
+
+# rank
+sens_combined %>% 
+  ggplot() +
+  geom_point(aes(x = rank_wildfire_hazard_old, y = rank_wildfire_hazard_new))
+
+#norm
+sens_combined %>% 
+  ggplot() +
+  geom_point(aes(x = norm_wildfire_hazard_old, y = norm_wildfire_hazard_new))
+```
 
 *Analysis completed on `r Sys.Date()`*
