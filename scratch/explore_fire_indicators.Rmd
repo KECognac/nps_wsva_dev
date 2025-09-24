@@ -543,10 +543,18 @@ sens_combined %>%
 #norm
 sens_combined %>% 
   ggplot() +
-  geom_point(aes(x = norm_wildfire_hazard_old, y = norm_wildfire_hazard_new, color = raw_wildfire_hazard_old))+
+  geom_point(aes(x = norm_wildfire_hazard_old, y = norm_wildfire_hazard_new, color = norm_wildfire_hazard_old))+
   scale_color_gradient(low = "lightcoral", high = "darkred")
 ```
 
+```{r}
+sens_combined %>% 
+  ggplot() +
+  geom_jitter(aes(x = norm_wildfire_hazard_new, y = rank_wildfire_hazard_new, color = norm_wildfire_hazard_old),
+             size = 4, height = 5)+
+  scale_color_gradient(low = "white", high = "darkred") +
+  theme(legend.position = "bottom")
+```
 
 
 *Analysis completed on `r Sys.Date()`*
