@@ -184,6 +184,56 @@ fire_sen <- calc_fire_sensitivity(water_supplies = water_supplies_buffer,
 # 2.77 mins for 1140 parks
 ```
 
+
+Test function including moderate categories with high and very high:
+```{r}
+whp_raster <- terra::rast("data/all/usfs_fire/whp2023_GeoTIF/whp2023_cls_conus.tif")
+
+
+binary <- terra::ifel(whp_raster %in% 3:5, 1, 0)
+
+# Process each water supply
+results <- map_dfr(seq_len(nrow(water_supplies_buffer)), function(i) {
+ 
+    # Calculate area-weighted % high/very high WHP category for water supply buffer
+    
+    ## pull out park shapefile and transform
+    ws <- terra::vect(st_transform(water_supplies_buffer[i, ], crs(whp_raster)))
+    
+    # Extract values with cell overlap fractions
+    extracted <- terra::extract(binary, ws, weights = TRUE, exact = TRUE)
+    
+    # weights column = fraction of cell in polygon
+    total_weight <- sum(extracted$weight, na.rm = TRUE)
+    coverage_weight <- sum(extracted$weight[extracted$class_desc == 1], na.rm = TRUE)
+    
+    percent <- (coverage_weight / total_weight) * 100
+    
+    # Create results tibble
+    tibble(
+      wsd_source_id = water_supplies_buffer[i, ]$wsd_source_id,
+      park_unit = water_supplies_buffer[i, ]$park_unit,
+      park_name = water_supplies_buffer[i, ]$park_name,
+      raw_wildfire_hazard_mean = percent
+    )
+    
+    
+  }
+  
+  
+  
+)
+
+# Calculate standardized indicators using helper function
+final_results <- results %>%
+  add_standardized_indicators("raw_wildfire_hazard")
+
+filename <- file.path("data/rapid/all/", paste0("fire_sensitivity_moderate", Sys.Date(), ".csv"))
+write_csv(final_results, filename)
+    
+```
+
+
 ## Testing
 
 Filter to Utah parks for testing

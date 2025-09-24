@@ -424,6 +424,7 @@ cat("   - Validate extreme values with domain experts\n")
 ```{r}
 fire_old <- read_csv("data/rapid/all/fire_sensitivity_2025-09-09.csv")
 fire_new <- read_csv("data/rapid/all/fire_sensitivity_2025-09-22.csv")
+fire_mod <- read_csv("data/rapid/all/fire_sensitivity_moderate2025-09-24.csv")
 ```
 
 Old Distribution
@@ -476,6 +477,31 @@ sens_long_new %>%
   theme_minimal()
 ```
 
+New with Moderate Category
+```{r}
+# Distribution of wildfire hazard
+sens_long_new <- fire_mod %>%
+  select(park_name, contains("wildfire_hazard")) %>%
+  pivot_longer(cols = -park_name, names_to = "indicator", values_to = "value") %>%
+  mutate(
+    type = case_when(
+      str_detect(indicator, "raw_") ~ "Raw Values",
+      str_detect(indicator, "norm_") ~ "Normalized", 
+      str_detect(indicator, "rank_") ~ "Ranked"
+    )
+  )
+
+# Distribution plots
+sens_long_new %>%
+  ggplot(aes(x = value, fill = type)) +
+  geom_histogram(bins = 30, alpha = 0.7) +
+  facet_wrap(~type, scales = "free") +
+  labs(title = "Distribution of Wildfire Hazard by Scaling Method",
+       x = "Wildfire Hazard Value", y = "Count") +
+  theme_minimal()
+```
+
+
 New vs. Old
 
 ```{r}
@@ -496,5 +522,31 @@ sens_combined %>%
   ggplot() +
   geom_point(aes(x = norm_wildfire_hazard_old, y = norm_wildfire_hazard_new))
 ```
+
+New vs. New w/ Moderate Category
+```{r}
+sens_combined <- fire_new %>% 
+  select(wsd_source_id, raw_wildfire_hazard_old = raw_wildfire_hazard_mean,
+         norm_wildfire_hazard_old = norm_wildfire_hazard_mean, rank_wildfire_hazard_old = rank_wildfire_hazard_mean) %>% 
+  left_join(fire_mod %>% select(wsd_source_id, raw_wildfire_hazard_new = raw_wildfire_hazard_mean, norm_wildfire_hazard_new = norm_wildfire_hazard_mean,
+                                rank_wildfire_hazard_new = rank_wildfire_hazard_mean))
+
+
+# rank
+sens_combined %>% 
+  ggplot() +
+  geom_point(aes(x = rank_wildfire_hazard_old, 
+                 y = rank_wildfire_hazard_new, 
+                 color = raw_wildfire_hazard_old)) +
+  scale_color_gradient(low = "lightcoral", high = "darkred")
+
+#norm
+sens_combined %>% 
+  ggplot() +
+  geom_point(aes(x = norm_wildfire_hazard_old, y = norm_wildfire_hazard_new, color = raw_wildfire_hazard_old))+
+  scale_color_gradient(low = "lightcoral", high = "darkred")
+```
+
+
 
 *Analysis completed on `r Sys.Date()`*
