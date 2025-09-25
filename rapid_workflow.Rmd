@@ -49,18 +49,19 @@ write_csv(water_supplies, "rapid_app/app_data/water_supplies.csv")
 
 *For each water supply point, calculate indicator at point + \~5km buffer.*
 
-# Create water supply buffer for raster stats
+## Create water supply buffer for raster stats
+
 To create appropriate buffers (i.e., smooth instead of jagged), need to apply st_buffer to sf object in a UTM CRS (instead of lat/long)
+
 ```{r}
 water_supplies_buffer <- water_supplies %>% 
   st_transform(crs = 32616) %>% 
   st_buffer(dist = 5000)
 ```
 
-
 # Calculate Indicators
 
-Each indicator (or component of multiple indicators) should have its own calculation function in a standalone .R file. Below is a standardized template for indicator functions:
+Each indicator should have its own calculation function in a standalone .R file. Below is a standardized template for indicator functions:
 
 ```{r eval = FALSE}
 calc_[indicator]_[type] <- function( 
@@ -81,7 +82,7 @@ calc_[indicator]_[type] <- function(
 
 Increase in likelihood of fires
 
-Prep pyrome data
+Prep pyrome data:
 
 ```{r}
 # read in input datasets
@@ -135,6 +136,7 @@ pyromes_selected <- delta_fireprob %>%
 
 ```
 
+Run indicator:
 
 ```{r}
 # Calculate indicator
@@ -159,7 +161,7 @@ runoff_exp <- calc_runoff_exposure(water_supplies = water_supplies,
                                    save = TRUE,
                                    output_dir = "data/rapid/all")
 
-# 23 minutes
+# 23 minutes for 1140 parks
 ```
 
 # Sensitivity
@@ -177,15 +179,15 @@ fire_sen <- calc_fire_sensitivity(water_supplies = water_supplies_buffer,
                           output_dir = "data/rapid/all"
                           )
 
-# BENCHMARKING
+# BENCHMARKING (continuous method)
 ## 1.91 mins for 23 parks
 ## 54.1 mins for 677 parks
 # New categorical method:
 # 2.77 mins for 1140 parks
 ```
 
-
 Test function including moderate categories with high and very high:
+
 ```{r}
 whp_raster <- terra::rast("data/all/usfs_fire/whp2023_GeoTIF/whp2023_cls_conus.tif")
 
@@ -233,14 +235,16 @@ write_csv(final_results, filename)
     
 ```
 
+------------------------------------------------------------------------
 
-## Testing
+# Testing
 
 Filter to Utah parks for testing
 
 ```{r}
+
 # park boundaries and metadata
-parks_sub <- parks %>% filter(STATE == "UT")
+parks_sub <- st_read("data/rapid/all/park_boundaries_2025-08-14.gpkg") %>% filter(STATE == "UT")
 
 
 # park water supplies
@@ -261,17 +265,21 @@ water_supplies_sub <- read_excel(table_path,
   st_as_sf(coords = (c("source_longitude", "source_latitude")),
            crs = 4326,
            remove = FALSE)
+
+water_supplies_sub_buffer <- water_supplies_sub %>% 
+  st_transform(crs = 32616) %>% 
+  st_buffer(dist = 5000)
 ```
 
 ### Fire Exposure
 
-pre-processing
+Pre-processing
 
 ```{r}
 # read in input datasets
 pyromes <- st_read("data/all/usfs_fire/Pyromes-RDS-2020-0020/Data/Pyromes_CONUS_20200206.shp") %>%
   st_make_valid() %>% 
-  sf::st_transform(st_crs(water_supplies))
+  sf::st_transform(st_crs(water_supplies_sub))
 
 
 # GAO 2021 FIRE PROBABILITY
@@ -319,7 +327,7 @@ pyromes_selected <- delta_fireprob %>%
 
 ```
 
-Function test
+Run indicator:
 
 ```{r}
 # Calculate indicator
@@ -329,16 +337,20 @@ fire_exp <- calc_fire_exposure(
   pyrome_data = pyromes,
   save = FALSE
 )
+
+# using terra filter method went form 1.2 minutes to 3 seconds
 ```
 
 ### Fire Sensitivity
 
 ```{r}
 # Calculate categorical indicator
-fire_sen <- calc_fire_sensitivity(water_supplies = filter(water_supplies_aoi, state %in% "UT"),
-                          whp_raster = "data/all/usfs_fire/whp2023_GeoTIF/whp2023_cls_conus.tif",
-                          whp_type = "cat",
-                          save = FALSE)
+fire_sen <- calc_fire_sensitivity(
+  water_supplies = water_supplies_sub_buffer,
+  whp_raster = "data/all/usfs_fire/whp2023_GeoTIF/whp2023_cls_conus.tif",
+  whp_type = "cat",
+  save = FALSE
+)
 ```
 
 ### Runoff Exposure
