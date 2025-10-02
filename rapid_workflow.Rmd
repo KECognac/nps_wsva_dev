@@ -12,9 +12,11 @@ source("setup.R")
 Read in park system
 
 ```{r}
-# park_system <- getParkSystem()
+parks <- getParkSystem()
 # read in pre-saved park file
-parks <- st_read("data/rapid/all/park_boundaries_2025-08-14.gpkg")
+# parks <- st_read("data/rapid/inputs/park_boundaries_2025-08-14.gpkg")
+
+park_centroids <- parks %>% st_centroid() %>%  dplyr::mutate(y = st_coordinates(.)[,2], x = st_coordinates(.)[,1])
 ```
 
 Read in water supply database for filtered parks
@@ -32,7 +34,21 @@ water_supplies <- read_excel(table_path,
     source_latitude = as.numeric(source_latitude)
   ) %>%
   filter(!state %in% c("AK", "AS", "HI", "MP", "PR", "VI")) %>%
-  filter(!source_type %in% c("Municipal", "Hauled")) %>%
+  left_join(
+    park_centroids %>% st_drop_geometry() %>% dplyr::select(UNIT_CODE, x, y),
+    by = c(park_unit = "UNIT_CODE")
+  ) %>% dplyr::mutate(
+    coords_flag = ifelse(
+      is.na(source_longitude) |
+        is.na(source_latitude),
+      "Centroid",
+      "Source Coordinates"
+    ),
+    source_longitude = ifelse(is.na(source_longitude), x, source_longitude),
+    source_latitude = ifelse(is.na(source_latitude), y, source_latitude)
+  ) %>%
+  # remove municipal and hauled source types, accounting for database entry errors
+  filter(!str_detect(source_type, regex("municipal|hauled", ignore_case = TRUE))) %>%
   drop_na(source_longitude, source_latitude) %>%
   st_as_sf(coords = (c("source_longitude", "source_latitude")),
            crs = 4326,
@@ -82,70 +98,19 @@ calc_[indicator]_[type] <- function(
 
 Increase in likelihood of fires
 
-Prep pyrome data:
-
 ```{r}
-# read in input datasets
-pyromes <- st_read("data/all/usfs_fire/Pyromes-RDS-2020-0020/Data/Pyromes_CONUS_20200206.shp") %>%
-  st_make_valid() %>% 
-  sf::st_transform(st_crs(water_supplies))
+# read in files
+pyromes <- st_read("data/rapid/inputs/pyromes.gpkg")
 
+pyromes_selected <- read_csv("data/rapid/inputs/pyromes_selected.csv")
 
-# GAO 2021 FIRE PROBABILITY
-crosswalk <- read_csv("data/all/usfs_fire/fire_projections_gao_2021/gcm_crosswalk.csv")
-
-# Back-casted GCMs, compared against GridMet. Really just need GridMet.
-fireprob_historic <- read_csv("data/all/usfs_fire/fire_projections_gao_2021/tables3-fireprob-hist.csv") %>%
-  dplyr::select(PYROME, GridMet)
-
-# Midcentury is defined as the avg. across 2040-2070:
-delta_fireprob <- read_csv("data/all/usfs_fire/fire_projections_gao_2021//tables12-45-midcentury.csv") %>%
-  pivot_longer(-PYROME, names_to = "gao") %>%
-  left_join(crosswalk, by = "gao") %>%
-  mutate(GCM = paste0(GCM, ".rcp45")) %>%
-  # do same thing on the 85 CFs, then bind together:
-  bind_rows(
-    read_csv("data/all/usfs_fire/fire_projections_gao_2021//tables6-85-midcentury.csv") %>%
-      tidyr::pivot_longer(-PYROME, names_to = "gao", values_to = "value") %>%
-      left_join(crosswalk, by = "gao") %>%
-      mutate(GCM = paste0(GCM, ".rcp85"))
-  ) %>%
-  # join historic data by pyrome:
-  left_join(fireprob_historic, by = "PYROME") %>%
-  # Description: "The probability of a fire increases/decreases by `delta_fp` percent." 
-  mutate(delta_fp = 100 * ((value - GridMet)/GridMet)) 
-
-# Pull 10th, 50th and 90th percentile values for each pyrome
-pyromes_selected <- delta_fireprob %>%
- group_by(PYROME) %>%
- slice(c(which.min(abs(delta_fp - quantile(delta_fp, 0.1))),
-         which.min(abs(delta_fp - quantile(delta_fp, 0.5))),
-         which.min(abs(delta_fp - quantile(delta_fp, 0.9))))) %>%
- mutate(percentile = case_when(
-   delta_fp == delta_fp[which.min(abs(delta_fp - quantile(delta_fp, 0.1)))] ~ "p10",
-   delta_fp == delta_fp[which.min(abs(delta_fp - quantile(delta_fp, 0.5)))] ~ "p50", 
-   delta_fp == delta_fp[which.min(abs(delta_fp - quantile(delta_fp, 0.9)))] ~ "p90"
- )) %>%
- ungroup() %>%
- pivot_wider(
-   names_from = percentile,
-   values_from = c(gao, value, GCM, GridMet, delta_fp),
-   names_sep = "_"
- )
-
-
-```
-
-Run indicator:
-
-```{r}
 # Calculate indicator
 fire_exp <- calc_fire_exposure(
   water_supplies = st_filter(water_supplies, pyromes),
   fire_prob_data = pyromes_selected,
   pyrome_data = pyromes,
   save = TRUE,
-  output_dir = "data/rapid/all"
+  output_dir = "data/rapid/outputs"
 )
 
 # BENCHMARK 
@@ -159,7 +124,7 @@ fire_exp <- calc_fire_exposure(
 ```{r}
 runoff_exp <- calc_runoff_exposure(water_supplies = water_supplies,
                                    save = TRUE,
-                                   output_dir = "data/rapid/all")
+                                   output_dir = "data/rapid/outputs")
 
 # 23 minutes for 1140 parks
 ```
@@ -176,7 +141,7 @@ fire_sen <- calc_fire_sensitivity(water_supplies = water_supplies_buffer,
                           whp_raster = "data/all/usfs_fire/whp2023_GeoTIF/whp2023_cls_conus.tif",
                           whp_type = "cat",
                           save = TRUE,
-                          output_dir = "data/rapid/all"
+                          output_dir = "data/rapid/outputs"
                           )
 
 # BENCHMARKING (continuous method)
@@ -184,55 +149,6 @@ fire_sen <- calc_fire_sensitivity(water_supplies = water_supplies_buffer,
 ## 54.1 mins for 677 parks
 # New categorical method:
 # 2.77 mins for 1140 parks
-```
-
-Test function including moderate categories with high and very high:
-
-```{r}
-whp_raster <- terra::rast("data/all/usfs_fire/whp2023_GeoTIF/whp2023_cls_conus.tif")
-
-
-binary <- terra::ifel(whp_raster %in% 3:5, 1, 0)
-
-# Process each water supply
-results <- map_dfr(seq_len(nrow(water_supplies_buffer)), function(i) {
- 
-    # Calculate area-weighted % high/very high WHP category for water supply buffer
-    
-    ## pull out park shapefile and transform
-    ws <- terra::vect(st_transform(water_supplies_buffer[i, ], crs(whp_raster)))
-    
-    # Extract values with cell overlap fractions
-    extracted <- terra::extract(binary, ws, weights = TRUE, exact = TRUE)
-    
-    # weights column = fraction of cell in polygon
-    total_weight <- sum(extracted$weight, na.rm = TRUE)
-    coverage_weight <- sum(extracted$weight[extracted$class_desc == 1], na.rm = TRUE)
-    
-    percent <- (coverage_weight / total_weight) * 100
-    
-    # Create results tibble
-    tibble(
-      wsd_source_id = water_supplies_buffer[i, ]$wsd_source_id,
-      park_unit = water_supplies_buffer[i, ]$park_unit,
-      park_name = water_supplies_buffer[i, ]$park_name,
-      raw_wildfire_hazard_mean = percent
-    )
-    
-    
-  }
-  
-  
-  
-)
-
-# Calculate standardized indicators using helper function
-final_results <- results %>%
-  add_standardized_indicators("raw_wildfire_hazard")
-
-filename <- file.path("data/rapid/all/", paste0("fire_sensitivity_moderate", Sys.Date(), ".csv"))
-write_csv(final_results, filename)
-    
 ```
 
 ------------------------------------------------------------------------
@@ -244,7 +160,7 @@ Filter to Utah parks for testing
 ```{r}
 
 # park boundaries and metadata
-parks_sub <- st_read("data/rapid/all/park_boundaries_2025-08-14.gpkg") %>% filter(STATE == "UT")
+parks_sub <- st_read("data/rapid/inputs/park_boundaries_2025-08-14.gpkg") %>% filter(STATE == "UT")
 
 
 # park water supplies
@@ -260,7 +176,7 @@ water_supplies_sub <- read_excel(table_path,
     source_latitude = as.numeric(source_latitude)
   ) %>%
   filter(park_unit %in% parks_sub$UNIT_CODE) %>%
-  filter(!source_type %in% c("Municipal", "Hauled")) %>%
+  filter(!source_type %in% c("Municipal", "Hauled", "municipal", "hauled")) %>%
   drop_na(source_longitude, source_latitude) %>%
   st_as_sf(coords = (c("source_longitude", "source_latitude")),
            crs = 4326,
@@ -273,63 +189,14 @@ water_supplies_sub_buffer <- water_supplies_sub %>%
 
 ### Fire Exposure
 
-Pre-processing
-
-```{r}
-# read in input datasets
-pyromes <- st_read("data/all/usfs_fire/Pyromes-RDS-2020-0020/Data/Pyromes_CONUS_20200206.shp") %>%
-  st_make_valid() %>% 
-  sf::st_transform(st_crs(water_supplies_sub))
-
-
-# GAO 2021 FIRE PROBABILITY
-crosswalk <- read_csv("data/all/usfs_fire/fire_projections_gao_2021/gcm_crosswalk.csv")
-
-# Back-casted GCMs, compared against GridMet. Really just need GridMet.
-fireprob_historic <- read_csv("data/all/usfs_fire/fire_projections_gao_2021/tables3-fireprob-hist.csv") %>%
-  dplyr::select(PYROME, GridMet)
-
-# Midcentury is defined as the avg. across 2040-2070:
-delta_fireprob <- read_csv("data/all/usfs_fire/fire_projections_gao_2021//tables12-45-midcentury.csv") %>%
-  pivot_longer(-PYROME, names_to = "gao") %>%
-  left_join(crosswalk, by = "gao") %>%
-  mutate(GCM = paste0(GCM, ".rcp45")) %>%
-  # do same thing on the 85 CFs, then bind together:
-  bind_rows(
-    read_csv("data/all/usfs_fire/fire_projections_gao_2021//tables6-85-midcentury.csv") %>%
-      tidyr::pivot_longer(-PYROME, names_to = "gao", values_to = "value") %>%
-      left_join(crosswalk, by = "gao") %>%
-      mutate(GCM = paste0(GCM, ".rcp85"))
-  ) %>%
-  # join historic data by pyrome:
-  left_join(fireprob_historic, by = "PYROME") %>%
-  # Description: "The probability of a fire increases/decreases by `delta_fp` percent." 
-  mutate(delta_fp = 100 * ((value - GridMet)/GridMet)) 
-
-
-# Pull 10th and 90th percentiles
-pyromes_selected <- delta_fireprob %>%
- group_by(PYROME) %>%
- slice(c(which.min(abs(delta_fp - quantile(delta_fp, 0.1))),
-         which.min(abs(delta_fp - quantile(delta_fp, 0.5))),
-         which.min(abs(delta_fp - quantile(delta_fp, 0.9))))) %>%
- mutate(percentile = case_when(
-   delta_fp == delta_fp[which.min(abs(delta_fp - quantile(delta_fp, 0.1)))] ~ "p10",
-   delta_fp == delta_fp[which.min(abs(delta_fp - quantile(delta_fp, 0.5)))] ~ "p50", 
-   delta_fp == delta_fp[which.min(abs(delta_fp - quantile(delta_fp, 0.9)))] ~ "p90"
- )) %>%
- ungroup() %>%
- pivot_wider(
-   names_from = percentile,
-   values_from = c(gao, value, GCM, GridMet, delta_fp),
-   names_sep = "_"
- )
-
-```
-
 Run indicator:
 
 ```{r}
+# read in files
+pyromes <- st_read("data/rapid/inputs/pyromes.gpkg")
+
+pyromes_selected <- read_csv("data/rapid/inputs/pyromes_selected.csv")
+
 # Calculate indicator
 fire_exp <- calc_fire_exposure(
   water_supplies = st_filter(water_supplies_sub, pyromes),
