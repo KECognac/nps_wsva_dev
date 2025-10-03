@@ -3,66 +3,176 @@ title: "rapid_data_processing"
 output: html_document
 ---
 
-# Pre-processing large datasets for Rapid workflow
+# Pre-processing datasets for Rapid workflow
 
-This workflow includes importing and organizing of large datasets for the rapid workflow to allow for quick re-runs of the rapid reports.
+This workflow includes importing and organizing of datasets for the rapid workflow to allow for quick re-runs of the rapid reports and a cleaner workflow.
 
 ```{r}
 source("setup.R")
+
+parks <- getParkSystem()
+
+# water supplies
+table_path <- "data/Water_Supply_Systems/NPS_Water_Systems_Database_Joined.xlsx"
+
+
+water_supplies <- read_excel(table_path,
+                             sheet = 1,
+                             na = c("NA", "U"),
+                             skip = 1) %>%
+  dplyr::mutate(
+    source_longitude = as.numeric(source_longitude),
+    source_latitude = as.numeric(source_latitude)
+  ) %>%
+  filter(!state %in% c("AK", "AS", "HI", "MP", "PR", "VI")) %>%
+  left_join(
+    park_centroids %>% 
+      st_drop_geometry() %>% 
+      dplyr::select(UNIT_CODE, x, y),
+    by = c(park_unit = "UNIT_CODE")
+  ) %>% dplyr::mutate(
+    coords_flag = ifelse(
+      is.na(source_longitude) |
+        is.na(source_latitude),
+      "Centroid",
+      "Source Coordinates"
+    ),
+    source_longitude = ifelse(is.na(source_longitude), x, source_longitude),
+    source_latitude = ifelse(is.na(source_latitude), y, source_latitude)
+  ) %>%
+  # remove municipal and hauled source types, accounting for database entry errors
+  filter(!str_detect(source_type, regex("municipal|hauled", ignore_case = TRUE))) %>%
+  drop_na(source_longitude, source_latitude) %>%
+  st_as_sf(coords = (c("source_longitude", "source_latitude")),
+           crs = 4326,
+           remove = FALSE)
+
 ```
 
 # Create File Structure
 
-First get list of all park names
-```{r}
-# get a list of all park names and filtered park list
+Create folders if they don't already exist
 
-#download a list of all park names and attributes
-parks <- getParkSystem()
-
-# clean file and join to list that has region codes
-parks_filtered <- parks %>%
-  st_drop_geometry() %>%
-  # remove non  conus
-  filter(!STATE %in% c("AK", "AS", "HI", "MP", "PR", "VI")) %>%
-  distinct(STATE, UNIT_CODE)
-
-# tie to unit list to get region code
-nps_list <- readxl::read_xlsx("data/NPS-Unit-List.xlsx") %>% 
-  # remove first row metadata
-  slice(-1) %>% 
-  janitor::clean_names() %>% 
-  dplyr::select(UNIT_CODE = park_code, region) %>% 
-  distinct() %>% 
-  inner_join(parks_filtered, by = "UNIT_CODE")
-```
-
-Now create folders if they don't already exist
 ```{r}
 if(!dir.exists("data/rapid")) {
   dir.create("data/rapid")
 }
+
+# folder for park-level data
+if(!dir.exists("data/rapid/park")) {
+  dir.create("data/rapid/park")
+}
+
+# folders for each park code
+walk(sort(parks$UNIT_CODE), function(x){
+  if(!dir.exists(paste0("data/rapid/park", x))) {
+    dir.create(paste0("data/rapid/park", x))
+  }
+})
 
 # folder for conus or US wide data
 if(!dir.exists("data/rapid/all")) {
   dir.create("data/rapid/all")
 }
 
-# folders for each park code
-walk(sort(parks$UNIT_CODE), function(x){
-  if(!dir.exists(paste0("data/rapid/", x))) {
-    dir.create(paste0("data/rapid/", x))
-  }
-})
+# folder for indicators input datasets
+if(!dir.exists("data/rapid/inputs")) {
+  dir.create("data/rapid/inputs")
+}
+
+# folder for indicator output datasets
+if(!dir.exists("data/rapid/outputs")) {
+  dir.create("data/rapid/outputs")
+}
+
 
 ```
 
+# Fire Probability Data
 
-## Centroid Climate Data
+Combine all Gao et al. files and save final file to feed into `calc_fire_exposure()`
+
+```{r}
+# read in input datasets
+pyromes <- st_read("data/all/usfs_fire/Pyromes-RDS-2020-0020/Data/Pyromes_CONUS_20200206.shp") %>%
+  st_make_valid() %>% 
+  sf::st_transform(4326)
+
+
+# GAO 2021 FIRE PROBABILITY
+crosswalk <- read_csv("data/all/usfs_fire/fire_projections_gao_2021/gcm_crosswalk.csv")
+
+# Back-casted GCMs, compared against GridMet. Really just need GridMet.
+fireprob_historic <- read_csv("data/all/usfs_fire/fire_projections_gao_2021/tables3-fireprob-hist.csv")
+
+# Midcentury is defined as the avg. across 2040-2070:
+delta_fireprob <- read_csv("data/all/usfs_fire/fire_projections_gao_2021/tables12-45-midcentury.csv") %>%
+  pivot_longer(-PYROME, names_to = "gao") %>%
+  left_join(crosswalk, by = "gao") %>%
+  mutate(GCM = paste0(GCM, ".rcp45")) %>%
+  # do same thing on the 85 CFs, then bind together:
+  bind_rows(
+    read_csv("data/all/usfs_fire/fire_projections_gao_2021/tables6-85-midcentury.csv") %>%
+      tidyr::pivot_longer(-PYROME, names_to = "gao", values_to = "value") %>%
+      left_join(crosswalk, by = "gao") %>%
+      mutate(GCM = paste0(GCM, ".rcp85"))
+  ) %>%
+  # join historic data by pyrome:
+  left_join(fireprob_historic, by = "PYROME") %>%
+  # Description: "The probability of a fire increases/decreases by `delta_fp` percent." 
+  #mutate(delta_fp = 100 * ((value - GridMet)/GridMet)) 
+  # new method, pulling each model's specific hind cast value instead of Gridmet
+  rowwise() %>% 
+  # No historic value for NorESM1 so using ensemble mean for that one
+  mutate(delta_fp = 100 * ((value - get(ifelse(gao == "NorESM1", "ensemblemean", gao)))/get(ifelse(gao == "NorESM1", "ensemblemean", gao)))) %>%
+  ungroup()
+
+# Pull 10th, 50th and 90th percentile values for each pyrome
+pyromes_selected <- delta_fireprob %>%
+ group_by(PYROME) %>%
+ slice(c(which.min(abs(delta_fp - quantile(delta_fp, 0.1))),
+         which.min(abs(delta_fp - quantile(delta_fp, 0.5))),
+         which.min(abs(delta_fp - quantile(delta_fp, 0.9))))) %>%
+ mutate(percentile = case_when(
+   delta_fp == delta_fp[which.min(abs(delta_fp - quantile(delta_fp, 0.1)))] ~ "p10",
+   delta_fp == delta_fp[which.min(abs(delta_fp - quantile(delta_fp, 0.5)))] ~ "p50", 
+   delta_fp == delta_fp[which.min(abs(delta_fp - quantile(delta_fp, 0.9)))] ~ "p90"
+ )) %>%
+ ungroup() %>%
+ pivot_wider(
+   names_from = percentile,
+   values_from = c(gao, value, GCM, GridMet, delta_fp),
+   names_sep = "_"
+ )
+
+```
+
+Save files
+
+```{r}
+write_csv(pyromes_selected, "data/rapid/inputs/pyromes_selected.csv")
+
+st_write(pyromes, "data/rapid/inputs/pyromes.gpkg", append = FALSE)
+```
+
+# Process WBM Files
+
+```{r}
+runoff_data <- list.files("data/all/loca2_mwbm/", full.names = TRUE, pattern = "*runoff") %>% .[!grepl("historical", .)]
+
+# Process all NetCDF files using helper function
+walk(runoff_data, ~loca2_mwbm_processor(.x, output_dir = "data/rapid/inputs/loca2_mwbm_runoff/", points = water_supplies, var = "runoff"))
+
+```
+
+------------------------------------------------------------------------
+
+## ***\*Old Code***\*
 
 ### Pull and save centroid climate data for all parks
 
-**Benchmarking:** This took ~2 hours on a 32BG deskop
+**Benchmarking:** This took \~2 hours on a 32BG deskop
+
 ```{r}
 # initiate error handling
 saferun <- safely(.f = get_centroid_climate_data)
@@ -70,14 +180,14 @@ saferun <- safely(.f = get_centroid_climate_data)
 # track progress
 imap(sort(unique(parks$UNIT_CODE)), ~{
   message(glue::glue("Processing {.y} of {length(unique(parks$UNIT_CODE))}: {.x}"))
-  saferun(park = .x, save = TRUE, path = "data/rapid")
+  saferun(park = .x, save = TRUE, path = "data/rapid/park")
 })
 ```
 
 Note: parks without centroid climate data will just be empty. Add a way to pull a list of all missing data parks
 
-
 Test new functions
+
 ```{r}
 # with saving
 get_centroid_climate_data("ARCH", save = TRUE, path = "data/rapid")
@@ -92,3 +202,6 @@ test2 <- select_cfs_rapid(park = "BRCA", region = "SWR", pull_data = TRUE,
                          to_plot = TRUE, save = FALSE, path = "data/rapid")
 ```
 
+```{r}
+
+```

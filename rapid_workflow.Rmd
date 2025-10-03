@@ -1,5 +1,5 @@
 ---
-title: "rapid_workflow_testing"
+title: "Rapid Workflow"
 output: html_document
 ---
 
@@ -12,23 +12,14 @@ source("setup.R")
 Read in park system
 
 ```{r}
-park_system <- getParkSystem()
-```
+parks <- getParkSystem()
+# read in pre-saved park file
+# parks <- st_read("data/rapid/inputs/park_boundaries_2025-08-14.gpkg")
 
-Read in selected GCMs
-
-*Note: future work will incorporate new method for selecting GCMs*
-
-```{r}
-selected_gcms <- read_csv("data/parkwide_GCMs.csv")
-```
-
-## Testing
-
-Filter to Utah parks for testing
-
-```{r}
-park_sub <- park_system %>% filter(STATE == "UT")
+park_centroids <- parks %>% 
+  st_centroid() %>% 
+  st_transform(4326) %>% 
+  dplyr::mutate(y = st_coordinates(.)[,2], x = st_coordinates(.)[,1])
 ```
 
 Read in water supply database for filtered parks
@@ -36,16 +27,75 @@ Read in water supply database for filtered parks
 ```{r}
 table_path <- "data/Water_Supply_Systems/NPS_Water_Systems_Database_Joined.xlsx"
 
-water_supplies <- read_excel(table_path, sheet = 1, na = c("NA","U"), skip = 1) %>%
-  as.data.frame() %>%
-      dplyr::filter(park_unit %in% park_sub$UNIT_CODE) %>%
-     drop_na(source_longitude, source_longitude) %>%
-    st_as_sf(coords = (c("source_longitude","source_latitude")),
+
+water_supplies <- read_excel(table_path,
+                             sheet = 1,
+                             na = c("NA", "U"),
+                             skip = 1) %>%
+  dplyr::mutate(
+    source_longitude = as.numeric(source_longitude),
+    source_latitude = as.numeric(source_latitude)
+  ) %>%
+  filter(!state %in% c("AK", "AS", "HI", "MP", "PR", "VI")) %>%
+  left_join(
+    park_centroids %>% 
+      st_drop_geometry() %>% 
+      dplyr::select(UNIT_CODE, x, y),
+    by = c(park_unit = "UNIT_CODE")
+  ) %>% dplyr::mutate(
+    coords_flag = ifelse(
+      is.na(source_longitude) |
+        is.na(source_latitude),
+      "Centroid",
+      "Source Coordinates"
+    ),
+    source_longitude = ifelse(is.na(source_longitude), x, source_longitude),
+    source_latitude = ifelse(is.na(source_latitude), y, source_latitude)
+  ) %>%
+  # remove municipal and hauled source types, accounting for database entry errors
+  filter(!str_detect(source_type, regex("municipal|hauled", ignore_case = TRUE))) %>%
+  drop_na(source_longitude, source_latitude) %>%
+  st_as_sf(coords = (c("source_longitude", "source_latitude")),
            crs = 4326,
-            remove = FALSE)
+           remove = FALSE)
+
+
 ```
 
-For each water supply point, calculate indicator at point + 5km buffer.
+Save water supplies to app data
+
+```{r}
+write_csv(water_supplies, "rapid_app/app_data/water_supplies.csv")
+```
+
+*For each water supply point, calculate indicator at point + \~5km buffer.*
+
+## Create water supply buffer for raster stats
+
+To create appropriate buffers (i.e., smooth instead of jagged), need to apply st_buffer to sf object in a UTM CRS (instead of lat/long)
+
+```{r}
+water_supplies_buffer <- water_supplies %>% 
+  st_transform(crs = 32616) %>% 
+  st_buffer(dist = 5000)
+```
+
+# Calculate Indicators
+
+Each indicator should have its own calculation function in a standalone .R file. Below is a standardized template for indicator functions:
+
+```{r eval = FALSE}
+calc_[indicator]_[type] <- function( 
+  water_supplies,           # sf object with water supply locations
+  [indicator_data],         # specific data for this indicator
+  additional_data = NULL,   # optional additional datasets
+  save = FALSE,            # whether to save output
+  output_dir = NULL,       # directory for saving
+  verbose = TRUE           # progress messages
+) {
+  # Function body
+} 
+```
 
 # Exposure
 
@@ -54,44 +104,36 @@ For each water supply point, calculate indicator at point + 5km buffer.
 Increase in likelihood of fires
 
 ```{r}
-# read in input datasets
-pyromes <- st_read("data/all/usfs_fire/Pyromes-RDS-2020-0020/Data/Pyromes_CONUS_20200206.shp") %>%
-  st_make_valid() %>% 
-  sf::st_transform(st_crs(water_supplies))
+# read in files
+pyromes <- st_read("data/rapid/inputs/pyromes.gpkg")
 
-
-# GAO 2021 FIRE PROBABILITY
-crosswalk <- read_csv("data/all/usfs_fire/fire_projections_gao_2021/gcm_crosswalk.csv")
-
-# Back-casted GCMs, compared against GridMet. Really just need GridMet.
-fireprob_historic <- read_csv("data/all/usfs_fire/fire_projections_gao_2021/tables3-fireprob-hist.csv") %>%
-  dplyr::select(PYROME, GridMet)
-
-# Midcentury is defined as the avg. across 2040-2070:
-delta_fireprob <- read_csv("data/all/usfs_fire/fire_projections_gao_2021//tables12-45-midcentury.csv") %>%
-  pivot_longer(-PYROME, names_to = "gao") %>%
-  left_join(crosswalk, by = "gao") %>%
-  mutate(GCM = paste0(GCM, ".rcp45")) %>%
-  # do same thing on the 85 CFs, then bind together:
-  bind_rows(
-    read_csv("data/all/usfs_fire/fire_projections_gao_2021//tables6-85-midcentury.csv") %>%
-      tidyr::pivot_longer(-PYROME, names_to = "gao", values_to = "value") %>%
-      left_join(crosswalk, by = "gao") %>%
-      mutate(GCM = paste0(GCM, ".rcp85"))
-  ) %>%
-  # join historic data by pyrome:
-  left_join(fireprob_historic, by = "PYROME") %>%
-  # Description: "The probability of a fire increases/decreases by `delta_fp` percent." 
-  mutate(delta_fp = 100 * ((value - GridMet)/GridMet)) 
-
+pyromes_selected <- read_csv("data/rapid/inputs/pyromes_selected.csv")
 
 # Calculate indicator
-fire_exp <- calc_fire_exp(aoi = water_supplies, fp_data = delta_fireprob,
-                          pyrome_data = pyromes, selected_gcms = selected_gcms)
+fire_exp <- calc_fire_exposure(
+  water_supplies = st_filter(water_supplies, pyromes),
+  fire_prob_data = pyromes_selected,
+  pyrome_data = pyromes,
+  save = TRUE,
+  output_dir = "data/rapid/outputs/"
+)
 
 # BENCHMARK 
 ## 38.45 secs for 23 parks
+## 50.46 MINs for 641 parks
+## 1.2 hours for 1184 parks
+# NEW TERRA METHOD
+## 38.6 seconds for 1151 parks
+```
 
+## Runoff
+
+```{r}
+runoff_exp <- calc_runoff_exposure(water_supplies = water_supplies,
+                                   save = TRUE,
+                                   output_dir = "data/rapid/outputs/")
+
+# 23 minutes for 1140 parks
 ```
 
 # Sensitivity
@@ -101,24 +143,94 @@ fire_exp <- calc_fire_exp(aoi = water_supplies, fp_data = delta_fireprob,
 Wildfire hazard potential
 
 ```{r}
-# Read in and clean shared datasets
+# Calculate indicator
+fire_sen <- calc_fire_sensitivity(water_supplies = water_supplies_buffer,
+                          whp_raster = "data/all/usfs_fire/whp2023_GeoTIF/whp2023_cls_conus.tif",
+                          whp_type = "cat",
+                          save = TRUE,
+                          output_dir = "data/rapid/outputs/"
+                          )
 
-## CONUS pyromes
-pyromes <- st_read("data/all/usfs_fire/Pyromes-RDS-2020-0020/Data/Pyromes_CONUS_20200206.shp") %>% st_make_valid() %>%
-  st_transform(st_crs(water_supplies))
+# BENCHMARKING (continuous method)
+## 1.91 mins for 23 parks
+## 54.1 mins for 677 parks
+# New categorical method:
+# 2.77 mins for 1140 parks
+```
 
-## CONUS continuous WHP
-whp_cnt <- terra::rast("data/all/usfs_fire/whp2023_GeoTIF/whp2023_cnt_conus.tif")
+------------------------------------------------------------------------
 
-# buffer ws points 
-water_supplies_buffer <- st_buffer(water_supplies, 5000)
+# Testing
+
+Filter to Utah parks for testing
+
+```{r}
+
+# park boundaries and metadata
+parks_sub <- st_read("data/rapid/inputs/park_boundaries_2025-08-14.gpkg") %>% filter(STATE == "UT")
+
+
+# park water supplies
+table_path <- "data/Water_Supply_Systems/NPS_Water_Systems_Database_Joined.xlsx"
+
+
+water_supplies_sub <- read_excel(table_path,
+                             sheet = 1,
+                             na = c("NA", "U"),
+                             skip = 1) %>%
+  dplyr::mutate(
+    source_longitude = as.numeric(source_longitude),
+    source_latitude = as.numeric(source_latitude)
+  ) %>%
+  filter(park_unit %in% parks_sub$UNIT_CODE) %>%
+  filter(!source_type %in% c("Municipal", "Hauled", "municipal", "hauled")) %>%
+  drop_na(source_longitude, source_latitude) %>%
+  st_as_sf(coords = (c("source_longitude", "source_latitude")),
+           crs = 4326,
+           remove = FALSE)
+
+water_supplies_sub_buffer <- water_supplies_sub %>% 
+  st_transform(crs = 32616) %>% 
+  st_buffer(dist = 5000)
+```
+
+### Fire Exposure
+
+Run indicator:
+
+```{r}
+# read in files
+pyromes <- st_read("data/rapid/inputs/pyromes.gpkg")
+
+pyromes_selected <- read_csv("data/rapid/inputs/pyromes_selected.csv")
 
 # Calculate indicator
-fire_sen <- calc_fire_sen(aoi = water_supplies_buffer,
-                          whp_data = whp_cnt,
-                          pyrome_data = pyromes)
+fire_exp <- calc_fire_exposure(
+  water_supplies = st_filter(water_supplies_sub, pyromes),
+  fire_prob_data = pyromes_selected,
+  pyrome_data = pyromes,
+  save = FALSE
+)
 
-# BENCHMARKING
-## 1.91 mins for 23 parks
+# using terra filter method went form 1.2 minutes to 3 seconds
+```
 
+### Fire Sensitivity
+
+```{r}
+# Calculate categorical indicator
+fire_sen <- calc_fire_sensitivity(
+  water_supplies = water_supplies_sub_buffer,
+  whp_raster = "data/all/usfs_fire/whp2023_GeoTIF/whp2023_cls_conus.tif",
+  whp_type = "cat",
+  save = FALSE
+)
+```
+
+### Runoff Exposure
+
+```{r}
+runoff_exp <- calc_runoff_exposure(water_supplies = water_supplies_sub)
+
+# 2.27 mins
 ```
