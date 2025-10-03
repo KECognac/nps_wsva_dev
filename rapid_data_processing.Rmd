@@ -11,6 +11,42 @@ This workflow includes importing and organizing of datasets for the rapid workfl
 source("setup.R")
 
 parks <- getParkSystem()
+
+# water supplies
+table_path <- "data/Water_Supply_Systems/NPS_Water_Systems_Database_Joined.xlsx"
+
+
+water_supplies <- read_excel(table_path,
+                             sheet = 1,
+                             na = c("NA", "U"),
+                             skip = 1) %>%
+  dplyr::mutate(
+    source_longitude = as.numeric(source_longitude),
+    source_latitude = as.numeric(source_latitude)
+  ) %>%
+  filter(!state %in% c("AK", "AS", "HI", "MP", "PR", "VI")) %>%
+  left_join(
+    park_centroids %>% 
+      st_drop_geometry() %>% 
+      dplyr::select(UNIT_CODE, x, y),
+    by = c(park_unit = "UNIT_CODE")
+  ) %>% dplyr::mutate(
+    coords_flag = ifelse(
+      is.na(source_longitude) |
+        is.na(source_latitude),
+      "Centroid",
+      "Source Coordinates"
+    ),
+    source_longitude = ifelse(is.na(source_longitude), x, source_longitude),
+    source_latitude = ifelse(is.na(source_latitude), y, source_latitude)
+  ) %>%
+  # remove municipal and hauled source types, accounting for database entry errors
+  filter(!str_detect(source_type, regex("municipal|hauled", ignore_case = TRUE))) %>%
+  drop_na(source_longitude, source_latitude) %>%
+  st_as_sf(coords = (c("source_longitude", "source_latitude")),
+           crs = 4326,
+           remove = FALSE)
+
 ```
 
 # Create File Structure
@@ -117,6 +153,16 @@ Save files
 write_csv(pyromes_selected, "data/rapid/inputs/pyromes_selected.csv")
 
 st_write(pyromes, "data/rapid/inputs/pyromes.gpkg", append = FALSE)
+```
+
+# Process WBM Files
+
+```{r}
+runoff_data <- list.files("data/all/loca2_mwbm/", full.names = TRUE, pattern = "*runoff") %>% .[!grepl("historical", .)]
+
+# Process all NetCDF files using helper function
+walk(runoff_data, ~loca2_mwbm_processor(.x, output_dir = "data/rapid/inputs/loca2_mwbm_runoff/", points = water_supplies, var = "runoff"))
+
 ```
 
 ------------------------------------------------------------------------

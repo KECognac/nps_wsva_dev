@@ -115,7 +115,7 @@ fire_exp <- calc_fire_exposure(
   fire_prob_data = pyromes_selected,
   pyrome_data = pyromes,
   save = TRUE,
-  output_dir = "data/rapid/outputs"
+  output_dir = "data/rapid/outputs/"
 )
 
 # BENCHMARK 
@@ -131,7 +131,7 @@ fire_exp <- calc_fire_exposure(
 ```{r}
 runoff_exp <- calc_runoff_exposure(water_supplies = water_supplies,
                                    save = TRUE,
-                                   output_dir = "data/rapid/outputs")
+                                   output_dir = "data/rapid/outputs/")
 
 # 23 minutes for 1140 parks
 ```
@@ -148,7 +148,7 @@ fire_sen <- calc_fire_sensitivity(water_supplies = water_supplies_buffer,
                           whp_raster = "data/all/usfs_fire/whp2023_GeoTIF/whp2023_cls_conus.tif",
                           whp_type = "cat",
                           save = TRUE,
-                          output_dir = "data/rapid/outputs"
+                          output_dir = "data/rapid/outputs/"
                           )
 
 # BENCHMARKING (continuous method)
