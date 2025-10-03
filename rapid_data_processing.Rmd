@@ -60,15 +60,14 @@ Combine all Gao et al. files and save final file to feed into `calc_fire_exposur
 # read in input datasets
 pyromes <- st_read("data/all/usfs_fire/Pyromes-RDS-2020-0020/Data/Pyromes_CONUS_20200206.shp") %>%
   st_make_valid() %>% 
-  sf::st_transform(st_crs(water_supplies))
+  sf::st_transform(4326)
 
 
 # GAO 2021 FIRE PROBABILITY
 crosswalk <- read_csv("data/all/usfs_fire/fire_projections_gao_2021/gcm_crosswalk.csv")
 
 # Back-casted GCMs, compared against GridMet. Really just need GridMet.
-fireprob_historic <- read_csv("data/all/usfs_fire/fire_projections_gao_2021/tables3-fireprob-hist.csv") %>%
-  dplyr::select(PYROME, GridMet)
+fireprob_historic <- read_csv("data/all/usfs_fire/fire_projections_gao_2021/tables3-fireprob-hist.csv")
 
 # Midcentury is defined as the avg. across 2040-2070:
 delta_fireprob <- read_csv("data/all/usfs_fire/fire_projections_gao_2021/tables12-45-midcentury.csv") %>%
@@ -85,7 +84,12 @@ delta_fireprob <- read_csv("data/all/usfs_fire/fire_projections_gao_2021/tables1
   # join historic data by pyrome:
   left_join(fireprob_historic, by = "PYROME") %>%
   # Description: "The probability of a fire increases/decreases by `delta_fp` percent." 
-  mutate(delta_fp = 100 * ((value - GridMet)/GridMet)) 
+  #mutate(delta_fp = 100 * ((value - GridMet)/GridMet)) 
+  # new method, pulling each model's specific hind cast value instead of Gridmet
+  rowwise() %>% 
+  # No historic value for NorESM1 so using ensemble mean for that one
+  mutate(delta_fp = 100 * ((value - get(ifelse(gao == "NorESM1", "ensemblemean", gao)))/get(ifelse(gao == "NorESM1", "ensemblemean", gao)))) %>%
+  ungroup()
 
 # Pull 10th, 50th and 90th percentile values for each pyrome
 pyromes_selected <- delta_fireprob %>%
@@ -112,7 +116,7 @@ Save files
 ```{r}
 write_csv(pyromes_selected, "data/rapid/inputs/pyromes_selected.csv")
 
-st_write(pyromes, "data/rapid/inputs/pyromes.gpkg")
+st_write(pyromes, "data/rapid/inputs/pyromes.gpkg", append = FALSE)
 ```
 
 ------------------------------------------------------------------------

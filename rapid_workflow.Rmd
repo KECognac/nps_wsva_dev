@@ -16,7 +16,10 @@ parks <- getParkSystem()
 # read in pre-saved park file
 # parks <- st_read("data/rapid/inputs/park_boundaries_2025-08-14.gpkg")
 
-park_centroids <- parks %>% st_centroid() %>%  dplyr::mutate(y = st_coordinates(.)[,2], x = st_coordinates(.)[,1])
+park_centroids <- parks %>% 
+  st_centroid() %>% 
+  st_transform(4326) %>% 
+  dplyr::mutate(y = st_coordinates(.)[,2], x = st_coordinates(.)[,1])
 ```
 
 Read in water supply database for filtered parks
@@ -35,7 +38,9 @@ water_supplies <- read_excel(table_path,
   ) %>%
   filter(!state %in% c("AK", "AS", "HI", "MP", "PR", "VI")) %>%
   left_join(
-    park_centroids %>% st_drop_geometry() %>% dplyr::select(UNIT_CODE, x, y),
+    park_centroids %>% 
+      st_drop_geometry() %>% 
+      dplyr::select(UNIT_CODE, x, y),
     by = c(park_unit = "UNIT_CODE")
   ) %>% dplyr::mutate(
     coords_flag = ifelse(
@@ -117,6 +122,8 @@ fire_exp <- calc_fire_exposure(
 ## 38.45 secs for 23 parks
 ## 50.46 MINs for 641 parks
 ## 1.2 hours for 1184 parks
+# NEW TERRA METHOD
+## 38.6 seconds for 1151 parks
 ```
 
 ## Runoff
