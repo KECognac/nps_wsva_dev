@@ -6,7 +6,7 @@ output: html_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(warning = FALSE, message = FALSE, fig.width = 13)
+knitr::opts_chunk$set(warning = FALSE, cache = TRUE, message = FALSE, fig.width = 13)
 ```
 
 
@@ -17,78 +17,122 @@ source("setup.R")
 First, we load in the water supply database. We are only performing this rapid assessment on CONUS water supplies that are not municipal or hauled water supplies.
 
 ```{r}
-water_supplies <- read_excel("data/Water_Supply_Systems/NPS_Water_Systems_Database_Joined_KW_Copy.xlsx", sheet = 1, na = c("NA","U"), skip = 1) %>%
-  as.data.frame() %>%
+parks <- getParkSystem()
+# read in pre-saved park file
+# parks <- st_read("data/rapid/inputs/park_boundaries_2025-08-14.gpkg")
+
+park_centroids <- parks %>% 
+  st_centroid() %>% 
+  st_transform(4326) %>% 
+  dplyr::mutate(y = st_coordinates(.)[,2], x = st_coordinates(.)[,1])
+table_path <- "data/Water_Supply_Systems/NPS_Water_Systems_Database_Joined_KW_Copy.xlsx"
+
+water_supplies <- read_excel(table_path,
+                             sheet = 1,
+                             na = c("NA", "U"),
+                             skip = 1) %>%
+  dplyr::mutate(
+    source_longitude = as.numeric(source_longitude),
+    source_latitude = as.numeric(source_latitude)
+  ) %>%
   filter(!state %in% c("AK", "AS", "HI", "MP", "PR", "VI")) %>%
-  filter(!source_type %in% c("Municipal", "Hauled")) %>%
-  mutate(source_longitude = as.numeric(source_longitude),
-         source_latitude = as.numeric(source_latitude)) %>%
-  drop_na(source_latitude, source_longitude) %>%
-  sf::st_as_sf(coords = (c("source_longitude","source_latitude")),
-               crs = 4326) %>%
+  left_join(
+    park_centroids %>% 
+      st_drop_geometry() %>% 
+      dplyr::select(UNIT_CODE, x, y),
+    by = c(park_unit = "UNIT_CODE")
+  ) %>% dplyr::mutate(
+    coords_flag = ifelse(
+      is.na(source_longitude) |
+        is.na(source_latitude),
+      "Centroid",
+      "Source Coordinates"
+    ),
+    source_longitude = ifelse(is.na(source_longitude), x, source_longitude),
+    source_latitude = ifelse(is.na(source_latitude), y, source_latitude)
+  ) %>%
+  # remove municipal and hauled source types, accounting for database entry errors
+  filter(!str_detect(source_type, regex("municipal|hauled", ignore_case = TRUE))) %>%
+  drop_na(source_longitude, source_latitude) %>%
+  st_as_sf(coords = (c("source_longitude", "source_latitude")),
+           crs = 4326,
+           remove = FALSE) %>%
   select(park_unit, wsd_source_id)
 ```
 
-Next, we load in our list of MWBM rasters we want to use for our analyses. Currently, we are using all future climate scenarios contained within Alder's database, and the "training" historical data sent to us directly that is currently unavailable to the public.
+Currently, we are using all future climate scenarios contained within Alder's database. (For historical data, we have the option of using either the hindcast data or the "training" historical data that was sent to us directly that is currently unavailable to the public.)
 
-```{r}
-# list of all NetCDF runoff files
-runoff_rasters <- list.files("data/all/loca2_mwbm/", full.names = TRUE, pattern = "*runoff") %>%
-  .[!grepl("historical", .)]
-```
+There are two components to the runoff indicator:
 
-Then, we calculate the runoff indicator's vulnerability score. There are two components to the runoff indicator:
-
-1) Runoff change "severity": this component is defined as the model closest to the 10th percentile of projected runoff changes across all climate models for each water supply location. This 10th percentile model's value is then normalized using min-max scaling, where the minimum and maximum values across all locations are used to rescale the data to a 0-1 range (`maxmin_p10_percent_change`). 
+1) Runoff change "severity": this component is defined as the model closest to the 10th percentile of projected runoff changes across all climate models for each water supply location. This 10th percentile model's value is then normalized using min-max scaling, where the minimum and maximum values across all locations are used to rescale the data to a 0-1 range (`norm_runoff_change_p10`). 
 
 2) "Consistency" of decreased runoff: this component is defined as the percentage of climate models that project negative runoff changes for each location and applies the same min-max normalization (`maxmin_percent_models_negative`). 
 
 The final vulnerability score is computed as a weighted average of these two normalized components: 
 
-`maxmin_recharge_vuln = (0.5 * maxmin_p10_percent_change) + (0.5 * maxmin_percent_models_negative)`
+`norm_recharge_vuln = (0.5 * norm_runoff_change_p10) + (0.5 * models_showing_decrease_pct)`
 
 This approach gives equal weight to both the severity of the worst(ish)-case scenarios (10th percentile) and the consistency of negative projections across models, creating a composite vulnerability index that ranges from 0 to 1, where higher values indicate greater vulnerability to reduced runoff under future climate conditions.
 
+```{r, eval = FALSE}
+runoff_data <- list.files("data/all/loca2_mwbm/", full.names = TRUE, pattern = "*runoff")
+
+# process all NetCDF files using "helper" function
+walk(runoff_data, ~process_loca2_mwbm(.x, 
+                                      output_dir = "data/rapid/inputs/loca2_mwbm_runoff/", 
+                                      water_supplies = water_supplies %>% select(park_unit, wsd_source_id), 
+                                      var = "runoff",
+                                      historical = c("1979-01-01", "2024-12-31"),
+                                      future = c("2035-01-01", "2065-12-31")))
+
+# took 24 minutes
+```
 ```{r}
-runoff_exp <- calc_runoff_exp(aoi = water_supplies,
-                              runoff_data = runoff_rasters,
-                              rerun_rast_extract = FALSE,
-                              save = FALSE,
-                              path = NULL)
+runoff_exp <- calc_runoff_exposure(water_supplies = water_supplies,
+                                            runoff_data = "data/rapid/inputs/loca2_mwbm_runoff/",
+                                            hindcast = TRUE,
+                                            historical = c("1995-01-01", "2024-12-31"),
+                                            future = c("2035-01-01", "2065-12-31"),
+                                            save = TRUE,
+                                            output_dir = "data/rapid/outputs/",
+                                            verbose = TRUE)
 ```
 
+## Rank vs. normalization 
 ### Model severity of [-] change in runoff: percentile score vs. normalized score
 
 ```{r, echo = FALSE}
 runoff_exp <- runoff_exp %>%
-  mutate(diff_p10 = maxmin_p10_percent_change - (pcntl_p10_percent_change/100),
-         diff_negative = maxmin_percent_models_negative - (pcntl_percent_models_negative/100),
-         diff_vuln = maxmin_recharge_vuln - (pcntl_recharge_vuln/100))
+  mutate(diff_p10 = norm_runoff_change_p10 - (rank_runoff_change_p10/100),
+         diff_negative = norm_models_showing_decrease_pct - (rank_models_showing_decrease_pct/100),
+         norm_recharge_vuln = (norm_runoff_change_p10 * 0.5) + (norm_models_showing_decrease_pct * 0.5),
+         rank_recharge_vuln = (rank_runoff_change_p10 * 0.5) + (rank_models_showing_decrease_pct * 0.5),
+         diff_vuln = norm_recharge_vuln - (rank_recharge_vuln/100))
 
-hist <- ggplot(runoff_exp, aes(x = raw_p10_percent_change)) +
+hist <- ggplot(runoff_exp, aes(x = raw_runoff_change_p10)) +
   geom_histogram(fill = "black", bins = 30) +
   labs(x = "Runoff Change (%)", y = "Count") +
   theme_bw() +
   theme(panel.grid.minor = element_blank())
 
-vs <- ggplot(runoff_exp, aes(x = pcntl_p10_percent_change, y = maxmin_p10_percent_change)) +
-  geom_point(aes(fill = raw_p10_percent_change), alpha = 0.7, color = "black", stroke = 0.5, shape = 21, size = 3.5) +
+vs <- ggplot(runoff_exp, aes(x = rank_runoff_change_p10, y = norm_runoff_change_p10)) +
+  geom_point(aes(fill = raw_runoff_change_p10), alpha = 0.7, color = "black", stroke = 0.5, shape = 21, size = 3.5) +
   scale_fill_gradientn(colours = c("darkred", "pink", "green"),
-                       values = scales::rescale(c(min(runoff_exp$raw_p10_percent_change, na.rm = TRUE),
+                       values = scales::rescale(c(min(runoff_exp$raw_runoff_change_p10, na.rm = TRUE),
                                                   0,
-                                                  max(runoff_exp$raw_p10_percent_change, na.rm = TRUE))),
+                                                  max(runoff_exp$raw_runoff_change_p10, na.rm = TRUE))),
                        name = "Runoff Change (%)") +
   labs(x = "Percentiles",
        y = "Max-Min Normalized") +
   theme_bw() +
   theme(plot.title = element_text(hjust = 0.5))
 
-dif <- ggplot(runoff_exp, aes(x = pcntl_p10_percent_change/100, y = diff_p10)) +
-  geom_point(aes(fill = raw_p10_percent_change), alpha = 0.7, color = "black", stroke = 0.5, shape = 21, size = 3.5) +
+dif <- ggplot(runoff_exp, aes(x = rank_runoff_change_p10/100, y = diff_p10)) +
+  geom_point(aes(fill = raw_runoff_change_p10), alpha = 0.7, color = "black", stroke = 0.5, shape = 21, size = 3.5) +
   scale_fill_gradientn(colours = c("darkred", "pink", "green"),
-                       values = scales::rescale(c(min(runoff_exp$raw_p10_percent_change, na.rm = TRUE),
+                       values = scales::rescale(c(min(runoff_exp$raw_runoff_change_p10, na.rm = TRUE),
                                                   0,
-                                                  max(runoff_exp$raw_p10_percent_change, na.rm = TRUE))),
+                                                  max(runoff_exp$raw_runoff_change_p10, na.rm = TRUE))),
                        name = "Runoff Change (%)") +
   labs(x = "Percentiles", 
        y = "Difference (Max-Min - Percentiles)") +
@@ -105,14 +149,14 @@ ggarrange(hist, vs, dif,
 ### Model consistency of [-] change in runoff: percentile score vs. normalized score
 
 ```{r, echo = FALSE}
-hist <- ggplot(runoff_exp, aes(x = raw_percent_models_negative)) +
+hist <- ggplot(runoff_exp, aes(x = raw_models_showing_decrease_pct)) +
   geom_histogram(fill = "black", bins = 30) +
   labs(x = "Negative Models (%)", y = "Count") +
   theme_bw() +
   theme(panel.grid.minor = element_blank())
 
-vs <- ggplot(runoff_exp, aes(x = pcntl_percent_models_negative, y = maxmin_percent_models_negative)) +
-  geom_point(aes(fill = raw_percent_models_negative), alpha = 0.7, color = "black", stroke = 0.5, shape = 21, size = 3.5) +
+vs <- ggplot(runoff_exp, aes(x = rank_models_showing_decrease_pct, y = norm_models_showing_decrease_pct)) +
+  geom_point(aes(fill = raw_models_showing_decrease_pct), alpha = 0.7, color = "black", stroke = 0.5, shape = 21, size = 3.5) +
   scale_fill_gradientn(colours = c("darkblue", "lightblue", "orange"),
                        name = "Negative Models (%)") +
   labs(#title = "Water Supply % Negative Models Rankings",
@@ -121,8 +165,8 @@ vs <- ggplot(runoff_exp, aes(x = pcntl_percent_models_negative, y = maxmin_perce
   theme_bw() +
   theme(plot.title = element_text(hjust = 0.5))
 
-dif <- ggplot(runoff_exp, aes(x = pcntl_percent_models_negative/100, y = diff_negative)) +
-    geom_point(aes(fill = raw_percent_models_negative), alpha = 0.7, color = "black", stroke = 0.5, shape = 21, size = 3.5) +
+dif <- ggplot(runoff_exp, aes(x = rank_models_showing_decrease_pct/100, y = diff_negative)) +
+  geom_point(aes(fill = raw_models_showing_decrease_pct), alpha = 0.7, color = "black", stroke = 0.5, shape = 21, size = 3.5) +
   scale_fill_gradientn(colours = c("darkblue", "lightblue", "orange"),
                        name = "Negative Models (%)") +
   labs(x = "Percentiles", 
@@ -143,21 +187,21 @@ There appears to be several distinct vulnerability "pathways"; high severity and
 
 ```{r, echo = FALSE}
 hist <- ggplot(data = runoff_exp) +
-  geom_histogram(aes(x = maxmin_recharge_vuln, fill = "Max-Min Normalized"), alpha = 0.4, bins = 30) +
-  geom_histogram(aes(x = pcntl_recharge_vuln/100, fill = "Percentiles"), alpha = 0.3, bins = 30) +
+  geom_histogram(aes(x = norm_recharge_vuln, fill = "Max-Min Normalized"), alpha = 0.4, bins = 30) +
+  geom_histogram(aes(x = rank_recharge_vuln/100, fill = "Percentiles"), alpha = 0.3, bins = 30) +
   scale_fill_manual(values = c("Max-Min Normalized" = "dodgerblue", "Percentiles" = "black")) +
   theme_bw() +
   xlab("Vulnerability Score") + ylab("Count") +
   labs(fill = "Method") +
   theme(legend.position = "none")
 
-vs <- ggplot(runoff_exp, aes(x = pcntl_recharge_vuln, y = maxmin_recharge_vuln)) +
-  geom_point(aes(fill = raw_p10_percent_change, size = raw_percent_models_negative), 
+vs <- ggplot(runoff_exp, aes(x = rank_recharge_vuln, y = norm_recharge_vuln)) +
+  geom_point(aes(fill = raw_runoff_change_p10, size = raw_models_showing_decrease_pct), 
              alpha = 0.7, color = "black", stroke = 0.5, shape = 21) +
   scale_fill_gradientn(colours = c("red", "yellow", "darkgreen"),
-                       values = scales::rescale(c(min(runoff_exp$raw_p10_percent_change, na.rm = TRUE),
-                                                  mean(runoff_exp$raw_p10_percent_change, na.rm = TRUE),
-                                                  max(runoff_exp$raw_p10_percent_change, na.rm = TRUE))),
+                       values = scales::rescale(c(min(runoff_exp$raw_runoff_change_p10, na.rm = TRUE),
+                                                  mean(runoff_exp$raw_runoff_change_p10, na.rm = TRUE),
+                                                  max(runoff_exp$raw_runoff_change_p10, na.rm = TRUE))),
                        name = "Runoff Change (%)") +
   scale_size_binned(name = "Negative Models (%)", 
                     range = c(0.01, 10),
@@ -168,13 +212,13 @@ vs <- ggplot(runoff_exp, aes(x = pcntl_recharge_vuln, y = maxmin_recharge_vuln))
   theme_bw() +
   theme(legend.position = "none")
 
-dif <- ggplot(runoff_exp, aes(x = pcntl_recharge_vuln/100, y = diff_vuln)) +
-    geom_point(aes(fill = raw_p10_percent_change, size = raw_percent_models_negative), 
+dif <- ggplot(runoff_exp, aes(x = rank_recharge_vuln/100, y = diff_vuln)) +
+  geom_point(aes(fill = raw_runoff_change_p10, size = raw_models_showing_decrease_pct), 
              alpha = 0.7, color = "black", stroke = 0.5, shape = 21) +
   scale_fill_gradientn(colours = c("red", "yellow", "darkgreen"),
-                       values = scales::rescale(c(min(runoff_exp$raw_p10_percent_change, na.rm = TRUE),
-                                                  mean(runoff_exp$raw_p10_percent_change, na.rm = TRUE),
-                                                  max(runoff_exp$raw_p10_percent_change, na.rm = TRUE))),
+                       values = scales::rescale(c(min(runoff_exp$raw_runoff_change_p10, na.rm = TRUE),
+                                                  mean(runoff_exp$raw_runoff_change_p10, na.rm = TRUE),
+                                                  max(runoff_exp$raw_runoff_change_p10, na.rm = TRUE))),
                        name = "Runoff Change (%)") +
   scale_size_binned(name = "Negative Models (%)", 
                     range = c(0.01, 10),
@@ -195,3 +239,263 @@ ggarrange(plots,
           ggarrange(legend_hist, legend_vs, nrow = 1), 
           nrow = 2, heights = c(4, 1))
 ```
+
+```{r, echo = FALSE}
+# for downstream plotting
+current_method <- runoff_exp %>% 
+  select(wsd_source_id, 
+         original_vuln = norm_recharge_vuln,
+         original_runoff_change_p10 = norm_runoff_change_p10,
+         original_models_showing_decrease_pct = norm_models_showing_decrease_pct,
+         og_raw_runoff_change_p10 = raw_runoff_change_p10,
+         og_raw_models_showing_decrease_pct = raw_models_showing_decrease_pct)
+```
+
+## Consequences of changing how we define the historical period
+
+We now have the ability to shift between using the hindcast data or the historical "training" data, as well as the ability to change the time period we use. Below are some figures that highlight how these changes effect
+the overall vulnerability score, the 10th percentile change in runoff, and the percentage of models showing negative changes in runoff.
+
+Important reminder: LOCA used data from 1950-2014 for model training. This means that if our historical reference period contains years since then, that data is 'predicted' (i.e., our current reference period of 1995-2024 uses both "hindcast" (or "training/observed") data from 199-2014 and "predicted" LOCA data from 2015-2024, technically).
+
+
+### Changing historical period from 1995-2024 to 1980-2010:
+```{r, echo = FALSE}
+runoff_exp_older <- calc_runoff_exposure(water_supplies = water_supplies,
+                                                  runoff_data = "data/rapid/inputs/loca2_mwbm_runoff/",
+                                                  hindcast = TRUE,
+                                                  historical = c("1980-01-01", "2010-12-31"),
+                                                  future = c("2035-01-01", "2065-12-31"),
+                                                  save = FALSE,
+                                                  output_dir = NULL,
+                                                  verbose = TRUE) %>%
+  mutate(norm_recharge_vuln = (norm_runoff_change_p10 * 0.5) + (norm_models_showing_decrease_pct * 0.5)) %>%
+  left_join(current_method, by = "wsd_source_id") 
+
+# compute shared limits
+lims1 <- range(c(runoff_exp_older$original_vuln, runoff_exp_older$norm_recharge_vuln), na.rm = TRUE)
+lims2 <- range(c(runoff_exp_older$og_raw_runoff_change_p10, runoff_exp_older$raw_runoff_change_p10), na.rm = TRUE)
+lims3 <- range(c(runoff_exp_older$og_raw_models_showing_decrease_pct, runoff_exp_older$raw_models_showing_decrease_pct), na.rm = TRUE)
+
+ggarrange(
+  # Vulnerability
+  ggplot(runoff_exp_older) +
+    geom_point(aes(x = original_vuln, y = norm_recharge_vuln, fill = original_vuln),
+               alpha = 1, color = "black", stroke = 0.5, shape = 21, size = 3.5) +
+    scale_fill_gradientn(colours = c("red", "yellow", "darkgreen"),
+                         values = scales::rescale(c(min(runoff_exp_older$original_vuln, na.rm = TRUE),
+                                                    mean(runoff_exp_older$original_vuln, na.rm = TRUE),
+                                                    max(runoff_exp_older$original_vuln, na.rm = TRUE))),
+                         name = "Current Approach") +
+    coord_equal(xlim = lims1, ylim = lims1) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray40") +
+    theme_bw() + 
+    theme(panel.grid.minor = element_blank()) +
+    xlab("Hindcast Data 1995–2024") + ylab("Hindcast Data 1980–2010") + ggtitle("Vulnerability Score"),
+  
+  # Raw % change in runoff plot
+  ggplot(runoff_exp_older) +
+    geom_point(aes(x = og_raw_runoff_change_p10, y = raw_runoff_change_p10, fill = og_raw_runoff_change_p10),
+               alpha = 1, color = "black", stroke = 0.5, shape = 21, size = 3.5) +
+    scale_fill_gradientn(colours = c("darkred", "pink", "green"),
+                         values = scales::rescale(c(min(runoff_exp_older$og_raw_runoff_change_p10, na.rm = TRUE),
+                                                    mean(runoff_exp_older$og_raw_runoff_change_p10, na.rm = TRUE),
+                                                    max(runoff_exp_older$og_raw_runoff_change_p10, na.rm = TRUE))),
+                         name = "Current Approach") +
+    coord_equal(xlim = lims2, ylim = lims2) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray40") +
+    theme_bw() + 
+    theme(panel.grid.minor = element_blank()) +
+    xlab("Hindcast Data 1995–2024") + ylab("Hindcast Data 1980–2010") + ggtitle("Raw Runoff Change (%)"),
+  
+  # Raw fraction of negative models
+  ggplot(runoff_exp_older) +
+    geom_point(aes(x = og_raw_models_showing_decrease_pct, y = raw_models_showing_decrease_pct, fill = og_raw_models_showing_decrease_pct),
+               alpha = 1, color = "black", stroke = 0.5, shape = 21, size = 3.5) +
+    scale_fill_gradientn(colours = c("darkblue", "lightblue", "orange"),
+                         name = "Current Approach") +
+    coord_equal(xlim = lims3, ylim = lims3) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray40") +
+    theme_bw() +
+    theme(panel.grid.minor = element_blank()) +
+    xlab("Hindcast Data 1995–2024") + ylab("Hindcast Data 1980–2010") + ggtitle("% Models Negative"),
+  ncol = 3,
+  legend = "none")
+
+```
+
+### Changing historical period from hindcast to training data
+```{r, echo = FALSE}
+runoff_exp_training <- calc_runoff_exposure(water_supplies = water_supplies,
+                                                     runoff_data = "data/rapid/inputs/loca2_mwbm_runoff/",
+                                                     hindcast = FALSE,
+                                                     historical = c("1995-01-01", "2024-12-31"),
+                                                     future = c("2035-01-01", "2065-12-31"),
+                                                     save = FALSE,
+                                                     output_dir = NULL,
+                                                     verbose = TRUE) %>%
+  mutate(norm_recharge_vuln = (norm_runoff_change_p10 * 0.5) + (norm_models_showing_decrease_pct * 0.5)) %>%
+  left_join(current_method, by = "wsd_source_id") 
+
+# compute shared limits
+lims1 <- range(c(runoff_exp_training$original_vuln, runoff_exp_training$norm_recharge_vuln), na.rm = TRUE)
+lims2 <- range(c(runoff_exp_training$og_raw_runoff_change_p10, runoff_exp_training$raw_runoff_change_p10), na.rm = TRUE)
+lims3 <- range(c(runoff_exp_training$og_raw_models_showing_decrease_pct, runoff_exp_training$raw_models_showing_decrease_pct), na.rm = TRUE)
+
+
+ggarrange(
+  # Vulnerability
+  ggplot(runoff_exp_training) +
+    geom_point(aes(x = original_vuln, y = norm_recharge_vuln, fill = original_vuln),
+               alpha = 1, color = "black", stroke = 0.5, shape = 21, size = 3.5) +
+    scale_fill_gradientn(colours = c("red", "yellow", "darkgreen"),
+                         values = scales::rescale(c(min(runoff_exp_training$original_vuln, na.rm = TRUE),
+                                                    mean(runoff_exp_training$original_vuln, na.rm = TRUE),
+                                                    max(runoff_exp_training$original_vuln, na.rm = TRUE))),
+                         name = "Current Approach") +
+    coord_equal(xlim = lims1, ylim = lims1) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray40") +
+    theme_bw() + 
+    theme(panel.grid.minor = element_blank()) +
+    xlab("Hindcast Data 1995–2024") + ylab("Training Data 1995–2024") + ggtitle("Vulnerability Score"),
+  
+  # Raw % change in runoff plot
+  ggplot(runoff_exp_training) +
+    geom_point(aes(x = og_raw_runoff_change_p10, y = raw_runoff_change_p10, fill = og_raw_runoff_change_p10),
+               alpha = 1, color = "black", stroke = 0.5, shape = 21, size = 3.5) +
+    scale_fill_gradientn(colours = c("darkred", "pink", "green"),
+                         values = scales::rescale(c(min(runoff_exp_training$og_raw_runoff_change_p10, na.rm = TRUE),
+                                                    mean(runoff_exp_training$og_raw_runoff_change_p10, na.rm = TRUE),
+                                                    max(runoff_exp_training$og_raw_runoff_change_p10, na.rm = TRUE))),
+                         name = "Current Approach") +
+    coord_equal(xlim = lims2, ylim = lims2) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray40") +
+    theme_bw() +
+    theme(panel.grid.minor = element_blank()) +
+    xlab("Hindcast Data 1995–2024") + ylab("Training Data 1995–2024") + ggtitle("Raw Runoff Change (%)"),
+  
+  # Raw fraction of negative models
+  ggplot(runoff_exp_training) +
+    geom_point(aes(x = og_raw_models_showing_decrease_pct, y = raw_models_showing_decrease_pct, fill = og_raw_models_showing_decrease_pct),
+               alpha = 1, color = "black", stroke = 0.5, shape = 21, size = 3.5) +
+    scale_fill_gradientn(colours = c("darkblue", "lightblue", "orange"),
+                         name = "Current Approach") +
+    coord_equal(xlim = lims3, ylim = lims3) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray40") +
+    theme_bw() +
+    theme(panel.grid.minor = element_blank()) +
+    xlab("Hindcast Data 1995–2024") + ylab("Training Data 1995–2024") + ggtitle("% Models Negative"),
+  
+  ncol = 3,
+  legend = "none")
+```
+
+### Changing the historical period, AND using training data:
+```{r, echo = FALSE}
+runoff_exp_old_approach <- calc_runoff_exposure(water_supplies = water_supplies,
+                                                         runoff_data = "data/rapid/inputs/loca2_mwbm_runoff/",
+                                                         hindcast = FALSE,
+                                                         historical = c("1980-01-01", "2010-12-31"),
+                                                         future = c("2035-01-01", "2065-12-31"),
+                                                         save = FALSE,
+                                                         output_dir = NULL,
+                                                         verbose = TRUE) %>%
+  mutate(norm_recharge_vuln = (norm_runoff_change_p10 * 0.5) + (norm_models_showing_decrease_pct * 0.5)) %>%
+  left_join(current_method, by = "wsd_source_id") 
+
+# compute shared limits
+lims1 <- range(c(runoff_exp_old_approach$original_vuln, runoff_exp_old_approach$norm_recharge_vuln), na.rm = TRUE)
+lims2 <- range(c(runoff_exp_old_approach$og_raw_runoff_change_p10, runoff_exp_old_approach$raw_runoff_change_p10), na.rm = TRUE)
+lims3 <- range(c(runoff_exp_old_approach$og_raw_models_showing_decrease_pct, runoff_exp_old_approach$raw_models_showing_decrease_pct), na.rm = TRUE)
+
+ggarrange(
+  # Vulnerability
+  ggplot(runoff_exp_old_approach) +
+    geom_point(aes(x = original_vuln, y = norm_recharge_vuln, fill = original_vuln),
+               alpha = 1, color = "black", stroke = 0.5, shape = 21, size = 3.5) +
+    scale_fill_gradientn(colours = c("red", "yellow", "darkgreen"),
+                         values = scales::rescale(c(min(runoff_exp_old_approach$original_vuln, na.rm = TRUE),
+                                                    mean(runoff_exp_old_approach$original_vuln, na.rm = TRUE),
+                                                    max(runoff_exp_old_approach$original_vuln, na.rm = TRUE))),
+                         name = "Current Approach") +
+    coord_equal(xlim = lims1, ylim = lims1) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray40") +
+    theme_bw() + theme(panel.grid.minor = element_blank()) +
+    xlab("Hindcast Data 1995–2024") + ylab("Training Data 1980–2010") + ggtitle("Vulnerability Score"),
+  
+  # Raw % change in runoff plot
+  ggplot(runoff_exp_old_approach) +
+    geom_point(aes(x = og_raw_runoff_change_p10, y = raw_runoff_change_p10, fill = og_raw_runoff_change_p10),
+               alpha = 1, color = "black", stroke = 0.5, shape = 21, size = 3.5) +
+    scale_fill_gradientn(colours = c("darkred", "pink", "green"),
+                         values = scales::rescale(c(min(runoff_exp_old_approach$og_raw_runoff_change_p10, na.rm = TRUE),
+                                                    mean(runoff_exp_old_approach$og_raw_runoff_change_p10, na.rm = TRUE),
+                                                    max(runoff_exp_old_approach$og_raw_runoff_change_p10, na.rm = TRUE))),
+                         name = "Current Approach") +
+    coord_equal(xlim = lims2, ylim = lims2) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray40") +
+    theme_bw() + 
+    theme(panel.grid.minor = element_blank()) +
+    xlab("Hindcast Data 1995–2024") + ylab("Training Data 1980–2010") + ggtitle("Raw Runoff Change (%)"),
+  
+  # Raw fraction of negative models
+  ggplot(runoff_exp_old_approach) +
+    geom_point(aes(x = og_raw_models_showing_decrease_pct, y = raw_models_showing_decrease_pct, fill = og_raw_models_showing_decrease_pct),
+               alpha = 1, color = "black", stroke = 0.5, shape = 21, size = 3.5) +
+    scale_fill_gradientn(colours = c("darkblue", "lightblue", "orange"),
+                         name = "Current Approach") +
+    coord_equal(xlim = lims3, ylim = lims3) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray40") +
+    theme_bw() +
+    theme(panel.grid.minor = element_blank()) +
+    xlab("Hindcast Data 1995–2024") + ylab("Training Data 1980–2010") + ggtitle("% Models Negative"),
+  
+  ncol = 3,
+  legend = "none")
+```
+
+### Looking at using 1980-2010 only, hindcast vs. training
+```{r, echo = FALSE}
+both_oldies <- runoff_exp_older %>% left_join(
+  runoff_exp_old_approach %>%
+    select(wsd_source_id, 
+           old_training_vuln = norm_recharge_vuln,
+           old_runoff_change_p10 = raw_runoff_change_p10,
+           old_models_showing_decrease_pct = raw_models_showing_decrease_pct), by = "wsd_source_id")
+
+# compute shared limits
+lims1 <- range(c(both_oldies$old_training_vuln, both_oldies$norm_recharge_vuln), na.rm = TRUE)
+lims2 <- range(c(both_oldies$old_runoff_change_p10, both_oldies$raw_runoff_change_p10), na.rm = TRUE)
+lims3 <- range(c(both_oldies$old_models_showing_decrease_pct, both_oldies$raw_models_showing_decrease_pct), na.rm = TRUE)
+
+ggarrange(
+  # Vulnerability
+  ggplot(both_oldies) +
+    geom_point(aes(x = norm_recharge_vuln, y = old_training_vuln)) +
+    coord_equal(xlim = lims1, ylim = lims1) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray40") +
+    theme_bw() + theme(panel.grid.minor = element_blank()) +
+    xlab("Hindcast Data 1980-2010") + ylab("Historical Data 1980-2010") + ggtitle("Vulnerability Score"),
+  
+  # Raw % change in runoff plot
+  ggplot(both_oldies) +
+    geom_point(aes(x = raw_runoff_change_p10, y = old_runoff_change_p10)) +
+    coord_equal(xlim = lims2, ylim = lims2) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray40") +
+    theme_bw() + theme(panel.grid.minor = element_blank()) +
+    xlab("Hindcast Data 1980-2010") + ylab("Training Data 1980-2010") + ggtitle("Raw Runoff Change (%)"),
+  
+  # Raw fraction of negative models
+  ggplot(both_oldies) +
+    geom_point(aes(x = raw_models_showing_decrease_pct, y = old_models_showing_decrease_pct)) +
+    coord_equal(xlim = lims3, ylim = lims3) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray40") +
+    theme_bw() +
+    theme(panel.grid.minor = element_blank(),
+          plot.title = element_text(hjust = 0.5)) +
+    xlab("Hindcast Data 1980-2010") + ylab("Training Data 1980-2010") + ggtitle("% Models Negative"),
+  
+  ncol = 3,
+  legend = "none")
+```
+
