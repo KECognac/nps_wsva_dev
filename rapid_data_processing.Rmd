@@ -12,8 +12,13 @@ source("setup.R")
 
 parks <- getParkSystem()
 
+park_centroids <- parks %>% 
+  st_centroid() %>% 
+  st_transform(4326) %>% 
+  dplyr::mutate(y = st_coordinates(.)[,2], x = st_coordinates(.)[,1])
+
 # water supplies
-table_path <- "data/Water_Supply_Systems/NPS_Water_Systems_Database_Joined.xlsx"
+table_path <- "data/Water_Supply_Systems/NPS_Water_Systems_Database_Joined_KW_Copy.xlsx"
 
 
 water_supplies <- read_excel(table_path,
@@ -158,11 +163,17 @@ st_write(pyromes, "data/rapid/inputs/pyromes.gpkg", append = FALSE)
 # Process WBM Files
 
 ```{r}
-runoff_data <- list.files("data/all/loca2_mwbm/", full.names = TRUE, pattern = "*runoff") %>% .[!grepl("historical", .)]
+runoff_data <- list.files("data/all/loca2_mwbm/", full.names = TRUE, pattern = "*runoff")
 
 # Process all NetCDF files using helper function
-walk(runoff_data, ~loca2_mwbm_processor(.x, output_dir = "data/rapid/inputs/loca2_mwbm_runoff/", points = water_supplies, var = "runoff"))
+walk(runoff_data, ~process_loca2_mwbm(.x, 
+                                      output_dir = "data/rapid/inputs/loca2_mwbm_runoff/", 
+                                      water_supplies = water_supplies %>% select(park_unit, wsd_source_id), 
+                                      var = "runoff",
+                                      historical = c("1980-01-01", "2024-12-31"),
+                                      future = c("2035-01-01", "2065-12-31")))
 
+# took 24 minutes
 ```
 
 ------------------------------------------------------------------------
