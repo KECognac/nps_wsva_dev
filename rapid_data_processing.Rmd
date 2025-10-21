@@ -18,7 +18,7 @@ park_centroids <- parks %>%
   dplyr::mutate(y = st_coordinates(.)[,2], x = st_coordinates(.)[,1])
 
 # water supplies
-table_path <- "data/Water_Supply_Systems/NPS_Water_Systems_Database_Joined_KW_Copy.xlsx"
+table_path <- "data/Water_Supply_Systems/NPS_Water_Systems_Database_Joined.xlsx"
 
 
 water_supplies <- read_excel(table_path,
