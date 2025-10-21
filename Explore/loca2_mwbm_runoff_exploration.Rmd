@@ -6,7 +6,7 @@ output: html_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(warning = FALSE, cache = TRUE, message = FALSE, fig.width = 13)
+knitr::opts_chunk$set(warning = FALSE, cache = FALSE, message = FALSE, fig.width = 13)
 ```
 
 
@@ -25,7 +25,7 @@ park_centroids <- parks %>%
   st_centroid() %>% 
   st_transform(4326) %>% 
   dplyr::mutate(y = st_coordinates(.)[,2], x = st_coordinates(.)[,1])
-table_path <- "data/Water_Supply_Systems/NPS_Water_Systems_Database_Joined_KW_Copy.xlsx"
+table_path <- "data/Water_Supply_Systems/NPS_Water_Systems_Database_Joined.xlsx"
 
 water_supplies <- read_excel(table_path,
                              sheet = 1,
@@ -257,7 +257,6 @@ We now have the ability to shift between using the hindcast data or the historic
 the overall vulnerability score, the 10th percentile change in runoff, and the percentage of models showing negative changes in runoff.
 
 Important reminder: LOCA used data from 1950-2014 for model training. This means that if our historical reference period contains years since then, that data is 'predicted' (i.e., our current reference period of 1995-2024 uses both "hindcast" (or "training/observed") data from 199-2014 and "predicted" LOCA data from 2015-2024, technically).
-
 
 ### Changing historical period from 1995-2024 to 1980-2010:
 ```{r, echo = FALSE}
