@@ -57,7 +57,7 @@ water_supplies <- read_excel(table_path,
   st_as_sf(coords = (c("source_longitude", "source_latitude")),
            crs = 4326,
            remove = FALSE) %>%
-  select(park_unit, wsd_source_id)
+  select(park_unit, wsd_source_id, park_name)
 ```
 
 Currently, we are using all future climate scenarios contained within Alder's database. (For historical data, we have the option of using either the hindcast data or the "training" historical data that was sent to us directly that is currently unavailable to the public.)
@@ -76,15 +76,15 @@ This approach gives equal weight to both the severity of the worst(ish)-case sce
 
 ```{r, eval = FALSE}
 runoff_data <- list.files("data/all/loca2_mwbm/", full.names = TRUE, pattern = "*runoff")
-
+start <- Sys.time()
 # process all NetCDF files using "helper" function
 walk(runoff_data, ~process_loca2_mwbm(.x, 
                                       output_dir = "data/rapid/inputs/loca2_mwbm_runoff/", 
                                       water_supplies = water_supplies %>% select(park_unit, wsd_source_id), 
                                       var = "runoff",
-                                      historical = c("1979-01-01", "2024-12-31"),
-                                      future = c("2035-01-01", "2065-12-31")))
-
+                                      historical = c("1950-01-01", "2024-12-31"),
+                                      future = c("2025-01-01", "2100-12-31")))
+Sys.time - start
 # took 24 minutes
 ```
 ```{r}
