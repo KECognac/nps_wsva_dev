@@ -130,10 +130,16 @@ fire_exp <- calc_fire_exposure(
 
 ```{r}
 runoff_exp <- calc_runoff_exposure(water_supplies = water_supplies,
-                                   save = TRUE,
-                                   output_dir = "data/rapid/outputs/")
+                                   runoff_data = "data/rapid/inputs/loca2_mwbm_runoff/",
+                                   hindcast = TRUE,
+                                   historical = c("1995-01-01", "2024-12-31"),
+                                   future = c("2035-01-01", "2065-12-31"),
+                                   save = FALSE,
+                                   output_dir = NULL,
+                                   verbose = TRUE)
 
-# 23 minutes for 1140 parks
+# 7 minutes for 1148 water sources when hindcast = TRUE
+# 4 minutes for 1148 water sources when hindcast = FALSE
 ```
 
 # Sensitivity
