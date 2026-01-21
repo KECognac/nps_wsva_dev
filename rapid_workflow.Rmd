@@ -65,7 +65,7 @@ water_supplies <- read_excel(table_path,
 Save water supplies to app data
 
 ```{r}
-write_csv(water_supplies, "rapid_app/app_data/water_supplies.csv")
+#write_csv(water_supplies, "rapid_app/app_data/water_supplies.csv")
 ```
 
 *For each water supply point, calculate indicator at point + \~5km buffer.*
@@ -77,7 +77,7 @@ To create appropriate buffers (i.e., smooth instead of jagged), need to apply st
 ```{r}
 water_supplies_buffer <- water_supplies %>% 
   st_transform(crs = 32616) %>% 
-  st_buffer(dist = 5000)
+  st_buffer(dist = 4000)
 ```
 
 # Calculate Indicators
@@ -162,6 +162,20 @@ fire_sen <- calc_fire_sensitivity(water_supplies = water_supplies_buffer,
 ## 54.1 mins for 677 parks
 # New categorical method:
 # 2.77 mins for 1140 parks
+```
+
+## Flood
+
+Current Flood Risk based on FEMA flood zoning
+
+```{r}
+flood_sen <- calc_flood_risk(
+  water_supplies,
+  dist = 4000,
+  save = TRUE,
+  output_dir = "data/rapid/outputs/"
+)
+# took 2.83 hours for 1411 water supplies
 ```
 
 ------------------------------------------------------------------------
