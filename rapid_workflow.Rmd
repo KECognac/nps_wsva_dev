@@ -86,12 +86,12 @@ Each indicator should have its own calculation function in a standalone .R file.
 
 ```{r eval = FALSE}
 calc_[indicator]_[type] <- function( 
-  water_supplies,           # sf object with water supply locations
-  [indicator_data],         # specific data for this indicator
-  additional_data = NULL,   # optional additional datasets
-  save = FALSE,            # whether to save output
-  output_dir = NULL,       # directory for saving
-  verbose = TRUE           # progress messages
+    water_supplies,           # sf object with water supply locations
+    [indicator_data],         # specific data for this indicator
+    additional_data = NULL,   # optional additional datasets
+    save = FALSE,            # whether to save output
+    output_dir = NULL,       # directory for saving
+    verbose = TRUE           # progress messages
 ) {
   # Function body
 } 
@@ -142,6 +142,30 @@ runoff_exp <- calc_runoff_exposure(water_supplies = water_supplies,
 # 4 minutes for 1148 water sources when hindcast = FALSE
 ```
 
+## Sea Level Rise Inundation
+
+```{r}
+# Read in water supply data with SLR projection information
+ws_slr_scenarios <- sf::st_read(here("data", "all", "coast_comp_data", 
+                                     "NOAA_SLRV_2022", "inundation_data",
+                                     "ws_inun_regions.gpkg")) %>%
+  # Filter for water supplies that have relevant inundation surface information
+  filter(!is.na(proj_file))
+
+slr_inundation_exp <- calc_inundation_exposure(
+  water_supplies = ws_slr_scenarios, 
+  inundation_raster_data_dir = here("data", "all", "coast_comp_data", 
+                                    "NOAA_SLRV_2022", "Extent_Rasters"), 
+  save = TRUE,            
+  output_dir = here("data", "all", "coast_comp_data", "NOAA_SLRV_2022", 
+                    "inundation_data"),      
+  verbose = TRUE         
+)
+
+# X minutes for 752 water sources, or 34 separate inundation regions
+```
+
+
 # Sensitivity
 
 ## Fire
@@ -151,11 +175,11 @@ Wildfire hazard potential
 ```{r}
 # Calculate indicator
 fire_sen <- calc_fire_sensitivity(water_supplies = water_supplies_buffer,
-                          whp_raster = "data/all/usfs_fire/whp2023_GeoTIF/whp2023_cls_conus.tif",
-                          whp_type = "cat",
-                          save = TRUE,
-                          output_dir = "data/rapid/outputs/"
-                          )
+                                  whp_raster = "data/all/usfs_fire/whp2023_GeoTIF/whp2023_cls_conus.tif",
+                                  whp_type = "cat",
+                                  save = TRUE,
+                                  output_dir = "data/rapid/outputs/"
+)
 
 # BENCHMARKING (continuous method)
 ## 1.91 mins for 23 parks
@@ -195,9 +219,9 @@ table_path <- "data/Water_Supply_Systems/NPS_Water_Systems_Database_Joined.xlsx"
 
 
 water_supplies_sub <- read_excel(table_path,
-                             sheet = 1,
-                             na = c("NA", "U"),
-                             skip = 1) %>%
+                                 sheet = 1,
+                                 na = c("NA", "U"),
+                                 skip = 1) %>%
   dplyr::mutate(
     source_longitude = as.numeric(source_longitude),
     source_latitude = as.numeric(source_latitude)
