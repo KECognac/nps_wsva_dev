@@ -19,8 +19,7 @@ of national parks are.
 
 We will start this notebook by pulling in different data sets. We will avoid
 generating data here (except for those data manipulations that are necessary for
-visualization). Information about where this data was generated will be related
-as well.
+visualization). 
 
 # Establish environment
 
@@ -35,41 +34,60 @@ source("setup.R")
 
 # Load the datasets
 
-## Read in buffered water supplies
+You can see how these data sets were generated or loaded in `src/rapid/process_inundation_data.R`
 
-You could find how these data were generated in `rapid_data_processing.Rmd` under:
-```         
-# Coastal Component Data
-## Generate the buffered water supply dataset
+## Read in the water supplies
+
+```{r}
+parks <- getParkSystem()
+
+park_centroids <- parks %>% 
+  st_centroid() %>% 
+  st_transform(4326) %>% 
+  dplyr::mutate(y = st_coordinates(.)[,2], x = st_coordinates(.)[,1])
+table_path <- "data/Water_Supply_Systems/NPS_Water_Systems_Database_Joined.xlsx"
+
+
+water_supplies <- read_excel(table_path,
+                             sheet = 1,
+                             na = c("NA", "U"),
+                             skip = 1) %>%
+  dplyr::mutate(
+    source_longitude = as.numeric(source_longitude),
+    source_latitude = as.numeric(source_latitude)
+  ) %>%
+  filter(!state %in% c("AK", "AS", "HI", "MP", "PR", "VI")) %>%
+  left_join(
+    park_centroids %>% 
+      st_drop_geometry() %>% 
+      dplyr::select(UNIT_CODE, x, y),
+    by = c(park_unit = "UNIT_CODE")
+  ) %>% dplyr::mutate(
+    coords_flag = ifelse(
+      is.na(source_longitude) |
+        is.na(source_latitude),
+      "Centroid",
+      "Source Coordinates"
+    ),
+    source_longitude = ifelse(is.na(source_longitude), x, source_longitude),
+    source_latitude = ifelse(is.na(source_latitude), y, source_latitude)
+  ) %>%
+  # remove municipal and hauled source types, accounting for database entry errors
+  filter(!str_detect(source_type, regex("municipal|hauled", ignore_case = TRUE))) %>%
+  drop_na(source_longitude, source_latitude) %>%
+  st_as_sf(coords = (c("source_longitude", "source_latitude")),
+           crs = 4326,
+           remove = FALSE)
 ```
 
-These data are based on the water supplies that are generated in `rapid_data_processing.Rmd`.
+## Read in buffered water supplies
 
 ```{r}
 all_buffer_ws <- sf::st_read(here("data", "all", "coast_comp_data",
                                   "altered_water_supplies", "buff_ws.gpkg"))
-
-gc()
 ```
 
 ## Interagency Task Force sea level rise (SLR) projections
-
-These data were sourced from: [Global and Regional Sea Level Rise Scenarios for
-the United States: Updated Mean Projections and Extreme Water Level
-Probabilities Along U.S. Coastlines](https://zenodo.org/records/5951626)
-
-The report that this data come from can be found here: [2022 Technical
-Report](https://earth.gov/sealevel/us/resources/2022-sea-level-rise-technical-report/)
-
-An interactive tool displaying these data can be found here: [Interagency Sea
-Level Rise Scenario Tool](https://sealevel.nasa.gov/task-force-scenario-tool)
-
-These data were made by the [Interagency Sea Level Task
-Force](https://earth.gov/sealevel/us/about/interagency-sea-level-task-force/).
-This working group consists of members from NOAA, NASA, JPL, USGS, EPA, FEMA,
-DoD, and USACE.
-
-These data are the projections (scenarios) of SLR from the interagency report.
 
 ### Read in the SLR projections from ITF
 
@@ -81,14 +99,7 @@ slr_projections <- terra::rast(here("data", "all", "coast_comp_data",
 
 ### Read in a coastal sample of the inundation projections
 
-This is a subset of the ITF SLR projection data that was generated in 
-`rapid_data_processing.Rmd` under:
-
-```
-# Coastal Component Data
-## Generate the Interagency Task Force (ITF) Sea Level Rise (SLR) Projections
-### Generate US Coast subset of ITF SLR projections
-```
+This is a CONUS coast subset of the ITF SLR projection data.
 
 ```{r}
 coast_projections <- terra::rast(here("data", "all", "coast_comp_data",
@@ -98,57 +109,57 @@ coast_projections <- terra::rast(here("data", "all", "coast_comp_data",
 
 ## Read in the buffered water supply data that is joined to the ITF SLR projection data
 
-You could find how these data were generated in `rapid_data_processing.Rmd` under:
-```         
-# Coastal Component Data
-## Generate the water supply data with ITF SLR projections
-```
-
-These data are based on the buffered water supply data that are generated in
-`rapid_data_processing.Rmd`.
-
 ```{r}
 # Buffered water supplies with ITF SLR projections
 ws_inun_proj <- sf::st_read(here("data", "all", "coast_comp_data",
                                  "altered_water_supplies", "buff_ws_itf_slr_proj.gpkg"))
 ```
 
-## Read in the buffered water supply data with their inundation region information
+## Read in the inundation region data
 
-You could find how these data were generated in `rapid_data_processing.Rmd` under:
-```         
-# Coastal Component Data
-## Download the NOAA inundation surface datasets
-### Generate the water supply data with the inundation region information
+```{r}
+inun_region_bboxs <- sf::st_read(here("data", "all", "coast_comp_data", 
+                                     "NOAA_SLRV_2022", "inundation_data", 
+                                     "inun_region_bboxs.gpkg"))
 ```
+
+## Read in the buffered water supply data with their inundation region information
 
 ```{r}
 # Buffered water supplies with region for inundation projections
-ws_inun_proj_reg <- sf::st_read(here("data", "all", "coast_comp_data", "NOAA_SLRV_2022", 
-                                     "inundation_data", "ws_inun_regions.gpkg"))
+ws_inun_proj_reg <- sf::st_read(here("data", "rapid", "inputs", "coast_comp", 
+                                     "buff_ws_inun_regions.gpkg"))
 ```
 
-## Read in the percent change in inundation data
+## Read in the SLR inundation exposure risk calculations
 
-You could find how these data were generated in `src/rapid/calc_inundation_exposure.R`,
-whose function was called in `rapid_workflow.Rmd`.
+You could find how these data were generated in `src/rapid/calc_inundation_exposure.R`.
+`calc_inundation_exposure()` function is called in `rapid_workflow.Rmd`.
 
 ```{r}
 # Buffered water supplies with percent change in inundation
-ws_inun_pct_delta <- sf::st_read(here("data", "all", "coast_comp_data", 
-                                      "NOAA_SLRV_2022", "inundation_data",
-                                      "inundation_exposure_(sys.date).csv"))
+inun_exp_files <- list.files(here("data", "rapid", "outputs"),
+                             pattern = "^inundation_exposure_.*\\.csv$",
+                             full.names = TRUE)
+ws_inun_pct_delta <- read_csv(inun_exp_files[length(inun_exp_files)],
+                              show_col_types = FALSE)
 ```
 
 ### Join the percent change dataset with the overall buffered water supply dataset
 
 The buffered water supplies with percent change in inundation dataset only has
-those data that were relevant to this analysis. That ends up being about 36 park
-units and 305 unique water supplies that have a change.
+those data that were relevant to this analysis. That ends up being about 51 park
+units and 384 unique water supplies that were considered for this analysis, and
+not all of those had changes.
 
 ```{r}
 # All buffered water supplies with their percent change
-buffered_ws <- left_join(ws_inun_proj_reg, ws_inun_pct_delta)
+complete_buffered_ws <- left_join(ws_inun_proj_reg, ws_inun_pct_delta,
+                                  by = join_by(ID, wsd_source_id, buffer_km, 
+                                               inun_proj_mm, inun_proj_closest_mm, 
+                                               depth_ft, inun_region, inun_surf_url, 
+                                               proj_file, ref_file)) %>%
+  mutate(inun_change = ifelse(is.na(inun_change), "no_to_no", inun_change))
 ```
 
 # Explore...
@@ -157,117 +168,348 @@ Now that we have read in all of the data let's explore the analysis.
 
 The data that we used for this analysis is in two parts. The first is the
 projected increase in SLR for a region, and the second is the inundation
-surfaces that are related to the projected increase in a region.
+surfaces that are related to the projected increase in a region. We relate 
+both of these data sets to our buffered water supplies.
 
-## Water supply specific SLR projections
+## Buffered water supplies
 
-The first thing that we needed to figure out was what the projected increase in
-SLR was a for a water supply. We did this by extracting the values from the SLR
-projection raster we generated that were related to each water supply.
-
-Here is an example of what it looked like. Note that this raster is not the same
-one that was used for the analysis. For the actual analysis we used the entire
-projection raster for this extraction, but that is too big for us to visualize
-here.
+The first step was to buffer each water supply point at two distances — 1 km and
+4 km — to capture inundation risk both immediately around the source and in its
+broader catchment area. The 1 km buffer (black) reflects the near-field risk
+directly at the source, while the 4 km buffer (grey) captures the wider area
+that could affect it.
 
 ```{r}
-# Visualization of the projections with the water supplies
-mapview(coast_projections) + mapview(water_supplies)
+mapview(all_buffer_ws %>% filter(buffer_km == 4),
+        col.regions = "grey",
+        alpha.regions = 0.5,
+        layer.name = "4 km Buffer") +
+  mapview(all_buffer_ws %>% filter(buffer_km == 1),
+          col.regions = "black",
+          alpha.regions = 0.5,
+          layer.name = "1 km Buffer")
 ```
+
+## Coastal SLR projections
+
+Once the buffers were created, we extracted the projected sea level rise for each
+water supply from the Interagency Task Force (ITF) gridded SLR projections (83rd
+percentile, 2050). These projections are in millimeters. The full projection
+raster covers the entire globe and is too large to visualize directly, so we use
+a pre-generated coastal CONUS subset here. Darker areas indicate greater
+projected SLR.
 
 ```{r}
-# Example of the dataset results
-kable(ws_inun_proj) %>%
-  kable_styling(bootstrap_options = c("condensed"),
-                full_width = FALSE) %>%
-  kable_paper(full_width = FALSE) 
+mapview(coast_projections,
+        col.regions = colorRampPalette(c("yellow", "red")),
+        na.color = "transparent",
+        layer.name = "ITF SLR Projection (mm, 83rd pct, 2050)")
 ```
 
-## Water supply specific inundation surfaces
+## Inundation regions
 
-Once we had the SLR projection information for each water supply we needed to
-find the right inundation surfaces specific to each water supply.
+With the ITF SLR projection value in hand for each water supply, we needed to
+match it to the correct NOAA Sea Level Rise Viewer (SLRV) inundation surface.
+NOAA's inundation surfaces are organized into geographic regions, each covering
+a contiguous coastal area within a state. We determined which region each
+buffered water supply fell into using a two-step approach.
 
-Here is an example of the way that we determined the region:
+**Step 1 — candidate regions:** We spatially joined each buffered water supply
+against the bounding boxes of all same-state reference (0 ft SLR) inundation
+rasters, keeping every candidate region that intersected the buffer. Sites whose
+buffer overlapped only one region proceed directly to the final assignment.
+
+**Step 2 — distance-based disambiguation:** For sites whose buffer intersected
+multiple candidate regions, we loaded the reference raster for each candidate
+and measured the straight-line distance from the original (unbuffered) water
+supply point to the nearest non-NA data cell in that raster. The region whose
+raster data lies closest to the water supply point was selected. This ensures
+the correct region is chosen even when bounding boxes overlap — a purely
+spatial or area-based heuristic can assign a site to a region whose raster has
+no actual coverage near that site.
 
 ```{r}
-# Visualization of the water supplies with the CA south region
-sample_rast <- terra::rast(here("data", "all", "coast_comp_data",
-                                "NOAA_SLRV_2022", "Extent_Rasters",
-                                "CA", "CA_South_connectRaster_0_0.tif"))
-
-terra::crs(sample_rast) <-  "+proj=longlat +datum=WGS84 +no_defs"
-sample_rast <- terra::trim(sample_rast)
-sample_rast <- terra::ext(sample_rast)
-bbox_poly <- terra::as.polygons(sample_rast)
-terra::crs(bbox_poly) <- "+proj=longlat +datum=WGS84 +no_defs"
-bbox_sf <- sf::st_as_sf(bbox_poly)
-sf::st_crs(bbox_sf) <- 4326
+mapview(inun_region_bboxs,
+        zcol = "state",
+        col.regions = colorRampPalette(c("steelblue", "mediumpurple", "darkgreen",
+                                         "dodgerblue", "turquoise", "royalblue",
+                                         "plum", "seagreen", "cornflowerblue")),
+        alpha.regions = 0.3,
+        layer.name = "Inundation Region")
 ```
+
+## Combined view
+
+This map brings together all three components of the processing workflow: the
+projected SLR severity across the coast (white to black), the NOAA inundation
+regions each water supply was assigned to (colored by state), and the buffered
+water supply locations (4 km in orange, 1 km in red). Together these layers show
+which water supplies are in high-SLR areas and which inundation surface region
+was used to assess their risk.
 
 ```{r}
-mapview(bbox_sf, col.regions = "grey", alpha.regions = 0.3) + 
-  mapview(water_supplies)
+mapview(coast_projections,
+        col.regions = colorRampPalette(c("yellow", "red")),
+        na.color = "transparent",
+        layer.name = "ITF SLR Projection (mm, 83rd pct, 2050)") +
+  mapview(inun_region_bboxs,
+          zcol = "state",
+          col.regions = colorRampPalette(c("steelblue", "mediumpurple", "darkgreen",
+                                           "dodgerblue", "turquoise", "royalblue",
+                                           "plum", "seagreen", "cornflowerblue")),
+          alpha.regions = 0.3,
+          layer.name = "Inundation Region") +
+  mapview(all_buffer_ws %>% filter(buffer_km == 4),
+          col.regions = "grey",
+          alpha.regions = 0.5,
+          layer.name = "4 km Buffer") +
+  mapview(all_buffer_ws %>% filter(buffer_km == 1),
+          col.regions = "black",
+          alpha.regions = 0.5,
+          layer.name = "1 km Buffer")
 ```
+
+## Understanding the inundation rasters
+
+Before looking at results, it helps to understand what the NOAA inundation
+rasters actually contain. Each raster is a binary surface where cells take one
+of two states: `1` (inundated at this SLR level), or `NA` (not inundated).
+
+Use the frequency table and map below to verify what NA cells represent in
+practice. You will see that the frequency of 1 is the exact difference between
+total cells and NA cells.
 
 ```{r}
-# Example of the dataset results
-kable(ws_inun_proj_reg) %>%
-  kable_styling(bootstrap_options = c("condensed"),
-                full_width = FALSE) %>%
-  kable_paper(full_width = FALSE) 
+# Load the reference raster for the MD East region as an example
+hatu_ref_raw <- terra::rast(here("data", "rapid", "inputs", "coast_comp",
+                                  "Extent_Rasters", "MD",
+                                  "MD_East_connectRaster_0.tif"))
+
+# Value frequency table: shows counts of 0, 1, and NA
+terra::freq(hatu_ref_raw)
+
+# NA cell count
+cat("NA cells:", sum(is.na(terra::values(hatu_ref_raw))), "\n")
+cat("Total cells:", terra::ncell(hatu_ref_raw), "\n")
+cat("Pct NA:", round(sum(is.na(terra::values(hatu_ref_raw))) / terra::ncell(hatu_ref_raw) * 100, 1), "%\n")
 ```
 
-## Water supply specific inundation changes
+Here we will map the two data types to verify this assumption again. 
+Cells with 1 are displayed in blue, while NA cells are displayed in grey.
+
+```{r}
+hatu_ref_viz <- hatu_ref_raw %>%
+  terra::trim() %>%
+  terra::aggregate(fact = 10, fun = "mean")
+
+mapview(hatu_ref_viz,
+        col.regions = "steelblue",
+        na.color = "grey",
+        layer.name = "NA cells (grey), Inundated cells (blue)")
+```
+
+## Understanding the exposure calculation
 
 Now that we have the projected SLR changes and the regions that are specific to
 each water supply we can assess the inundation risks.
 
 We did this by taking a count of the pixels in the buffer region around the
 water supplies which are inundated under 0 feet of inundation, and comparing
-that to their projected inundation surfaces
+that to their projected inundation surfaces.
+
+Pass an `inun_region` name to `plot_inun_region_exposure()` to see the
+reference and projected inundation surfaces for that region alongside the
+buffered water supplies. The function zooms to the inundation region bounding
+box expanded by 3km.
 
 ```{r}
-hatu_sample <- ws_inun_pct_delta_final %>%
-  filter(inundation_region == "MD_East_connectRaster")
+plot_inun_region_exposure <- function(
+    inun_region_name,
+    ws_data = complete_buffered_ws,
+    region_bboxs = inun_region_bboxs,
+    raster_dir = here("data", "rapid", "inputs", "coast_comp", "Extent_Rasters")
+) {
 
-# Process HATU rasters with aggregation
-hatu_ref_processed <- terra::rast(here("data", "all", "coast_comp_data",
-                                      "NOAA_SLRV_2022", "Extent_Rasters",
-                                      "MD", "MD_East_connectRaster_0.tif")) %>%
-  terra::trim() %>%
-  terra::aggregate(fact = 10, fun = "mean")
+  if (length(inun_region_name) != 1) {
+    stop("Only one inundation region can be plotted at a time.")
+  }
 
+  # Filter water supplies to the requested region
+  region_ws <- ws_data %>%
+    filter(inun_region == inun_region_name)
 
-hatu_proj_processed <- terra::rast(here("data", "all", "coast_comp_data",
-                                       "NOAA_SLRV_2022", "Extent_Rasters",
-                                       "MD", "MD_East_connectRaster_2_5.tif")) %>%
-  terra::trim() %>%
-  terra::aggregate(fact = 10, fun = "mean")
+  if (nrow(region_ws) == 0) {
+    stop("No water supplies found for inundation region: ", inun_region_name)
+  }
+
+  # Pull raster metadata from the data (one value per region by design)
+  state     <- unique(na.omit(region_ws$state))
+  ref_file  <- unique(na.omit(region_ws$ref_file))
+  proj_file <- unique(na.omit(region_ws$proj_file))
+
+  crs_val <- "+proj=longlat +datum=WGS84 +no_defs"
+
+  # Load, assign CRS, trim, and aggregate reference raster
+  ref_rast <- terra::rast(here(raster_dir, state, ref_file))
+  terra::crs(ref_rast) <- crs_val
+  ref_rast <- ref_rast %>%
+    terra::trim() %>%
+    terra::aggregate(fact = 10, fun = "mean")
+
+  # Load, assign CRS, trim, and aggregate projected raster
+  proj_rast <- terra::rast(here(raster_dir, state, proj_file))
+  terra::crs(proj_rast) <- crs_val
+  proj_rast <- proj_rast %>%
+    terra::trim() %>%
+    terra::aggregate(fact = 10, fun = "mean")
+
+  # Build zoom extent: region bbox buffered out 3 km
+  ext <- region_bboxs %>%
+    filter(inun_region == inun_region_name) %>%
+    sf::st_transform(5070) %>%
+    sf::st_buffer(3000) %>%
+    sf::st_transform(4326) %>%
+    sf::st_bbox()
+
+  # Build layered map
+  m <- mapview(proj_rast,
+               col.regions = "tomato",
+               alpha.regions = 0.7,
+               na.color = "transparent",
+               layer.name = "Projected inundation") +
+    mapview(ref_rast,
+            col.regions = "steelblue",
+            alpha.regions = 0.8,
+            na.color = "transparent",
+            layer.name = "Reference inundation (0 ft SLR)") +
+    mapview(region_ws %>% filter(buffer_km == 4),
+            col.regions = "grey",
+            alpha.regions = 0.5,
+            layer.name = "4 km buffer") +
+    mapview(region_ws %>% filter(buffer_km == 1),
+            col.regions = "black",
+            alpha.regions = 0.5,
+            layer.name = "1 km buffer")
+
+  # Zoom to region extent + 3 km buffer
+  m@map <- m@map %>%
+    leaflet::fitBounds(ext[["xmin"]], ext[["ymin"]], ext[["xmax"]], ext[["ymax"]])
+
+  gc()
+  
+  return(m)
+}
+```
+
+Play around here with the plotting function here:
+
+```{r}
+plot_inun_region_exposure("MD_Southeast_connectRaster")
+```
+
+## Let's get some exciting examples
+
+The dataframes below pull out the most interesting subsets from
+`complete_buffered_ws` — top movers by different metrics, and one example each
+of the `inun_change` edge cases. Use these data frames to look for interesting
+regions to pass into the `plot_inun_region_exposure()` function.
+
+### Biggest raw percent point change
+
+Water supplies with the largest absolute percentage point increase in inundation
+coverage (projected minus reference). This is the most intuitive measure of
+"how much more of the buffer gets flooded."
+
+```{r}
+most_pct_point_change <- complete_buffered_ws %>%
+  filter(!is.na(raw_pct_point_change)) %>%
+  slice_max(raw_pct_point_change, n = 10) %>%
+  st_drop_geometry() %>%
+  select(park_unit, wsd_source_id, inun_region, buffer_km,
+         raw_coverage_pct_ref, raw_coverage_pct_proj, raw_pct_point_change)
 ```
 
 ```{r}
-# Create layered mapview
-mapview(hatu_proj_processed, 
-        col.regions = "steelblue4", 
-        alpha.regions = 0.7,
-        layer.name = "Projected") +
-mapview(hatu_ref_processed, 
-        col.regions = "darkgreen", 
-        alpha.regions = 0.8,
-        layer.name = "Reference") +
-mapview(hatu_sample, 
-        col.regions = "darkred", 
-        alpha.regions = 0.6,
-        layer.name = "HATU Water Supplies")
-
+plot_inun_region_exposure(most_pct_point_change$inun_region[1])
 ```
 
-# Histograms...
+### Biggest relative percent change
+
+Water supplies with the highest ranked relative percent change. We use
+`rank_pct_change` rather than `raw_pct_change` here because `raw_pct_change` is
+`Inf` for `no_to_some` sites — the rank handles those correctly by placing them
+at the top.
 
 ```{r}
-library(patchwork)
+most_pct_change <- complete_buffered_ws %>%
+  filter(!is.na(rank_pct_change)) %>%
+  slice_max(rank_pct_change, n = 10) %>%
+  st_drop_geometry() %>%
+  select(park_unit, wsd_source_id, inun_region, buffer_km,
+         raw_coverage_pct_ref, raw_coverage_pct_proj, raw_pct_change, inun_change)
+```
 
+```{r}
+plot_inun_region_exposure(most_pct_change$inun_region[1])
+```
+
+### Biggest absolute cell change
+
+Water supplies with the most raster cells newly flooded in the projected
+scenario. Useful for understanding scale of exposure beyond just percentages.
+
+```{r}
+most_cell_change <- complete_buffered_ws %>%
+  filter(!is.na(raw_cell_change)) %>%
+  slice_max(raw_cell_change, n = 10) %>%
+  st_drop_geometry() %>%
+  select(park_unit, wsd_source_id, inun_region, buffer_km,
+         raw_flooded_cells_ref, raw_flooded_cells_proj, raw_cell_change)
+```
+
+```{r}
+plot_inun_region_exposure(most_cell_change$inun_region[1])
+```
+
+### `inun_change` category examples
+
+One example of each `inun_change` category — useful for sanity checking the
+categorization logic and for building representative visualizations.
+
+```{r}
+# No inundation in either scenario — coastal park but not at risk
+no_to_no_example <- complete_buffered_ws %>%
+  filter(inun_change == "no_to_no") %>%
+  slice_head(n = 1)
+
+# Newly inundated — no flooding at reference, some flooding projected
+no_to_some_example <- complete_buffered_ws %>%
+  filter(inun_change == "no_to_some") %>%
+  slice_head(n = 1)
+
+# Worsening inundation — flooded in both scenarios, getting worse
+some_to_some_example <- complete_buffered_ws %>%
+  filter(inun_change == "some_to_some") %>%
+  slice_max(raw_pct_point_change, n = 1)
+
+# Shrinking inundation — flooded at reference, not in projection (edge case)
+some_to_no_example <- complete_buffered_ws %>%
+  filter(inun_change == "some_to_no") %>%
+  slice_head(n = 1)
+
+# Summary of inun_change category counts
+complete_buffered_ws %>%
+  st_drop_geometry() %>%
+  count(inun_change, buffer_km)
+```
+
+```{r}
+plot_inun_region_exposure(some_to_some_example$inun_region[1])
+```
+
+# Histogram and result exploration
+
+```{r}
 coast_histogram <- function(data, column_name, dataset_name) {
   # Calculate statistics
   stats <- data %>% 
@@ -331,24 +573,68 @@ coast_histogram <- function(data, column_name, dataset_name) {
   return(p)
 }
 
-# Generate comparison plots for key metrics
-key_metrics <- c("ref_coverage_pct", "proj_coverage_pct", "pct_point_change", 
-                 "relative_pct_change", "abs_pct_point_change")
+# Key metrics to explore — raw values and their normalized counterparts.
+# raw_pct_change is excluded here because it contains Inf for no_to_some sites;
+# use rank_pct_change instead to get a well-behaved distribution.
+key_metrics <- c(
+  "raw_coverage_pct_ref",  "raw_coverage_pct_proj",
+  "raw_pct_point_change",  "raw_cell_change",
+  "norm_coverage_pct_ref", "norm_coverage_pct_proj",
+  "norm_pct_point_change", "norm_cell_change",
+  "rank_pct_change"
+)
 
-# Create paired plots for comparison
-comparison_plots <- map(key_metrics, function(metric) {
-  p1 <- coast_histogram(ws_inun_pct_delta_final, metric, "Waters with Changes Only")
-  p2 <- coast_histogram(buffered_ws, metric, "All Water Supplies")
-  
-  # Combine with patchwork
-  combined <- p1 + p2 + plot_layout(ncol = 2)
-  combined <- combined + plot_annotation(
-    title = paste("Comparison:", str_to_title(gsub("_", " ", metric))),
-    theme = theme(plot.title = element_text(size = 16, face = "bold", hjust = 0.5))
-  )
-  return(combined)
+# Waters with changes only: exclude no_to_no rows whose raw metrics are all NA
+changes_only <- ws_inun_pct_delta %>%
+  filter(inun_change != "no_to_no")
+
+# Build one histogram per metric for each dataset
+changes_plots <- map(key_metrics, function(metric) {
+  coast_histogram(changes_only, metric, "Waters with Changes Only")
 })
+names(changes_plots) <- key_metrics
 
-# Display plots
-walk(comparison_plots, print)
+all_ws_plots <- map(key_metrics, function(metric) {
+  coast_histogram(complete_buffered_ws %>% st_drop_geometry(), metric, "All Water Supplies")
+})
+names(all_ws_plots) <- key_metrics
+
+# Display each metric as a side-by-side comparison
+comparison_plots <- map(key_metrics, function(metric) {
+  changes_plots[[metric]] + all_ws_plots[[metric]] +
+    plot_layout(ncol = 2) +
+    plot_annotation(
+      title = paste("Comparison:", str_to_title(gsub("_", " ", metric))),
+      theme = theme(plot.title = element_text(size = 16, face = "bold", hjust = 0.5))
+    )
+})
+names(comparison_plots) <- key_metrics
+```
+
+`inun_change` is categorical so it gets its own bar chart rather than a
+histogram. Counts are broken out by buffer size so you can see whether the
+1 km and 4 km buffers tell different stories.
+
+```{r}
+complete_buffered_ws %>%
+  st_drop_geometry() %>%
+  filter(!is.na(inun_change)) %>%
+  count(inun_change, buffer_km) %>%
+  ggplot(aes(x = inun_change, y = n, fill = factor(buffer_km))) +
+  geom_bar(stat = "identity", position = "dodge") +
+  scale_fill_manual(values = c("1" = "red", "4" = "orange"),
+                    labels = c("1" = "1 km", "4" = "4 km"),
+                    name = "Buffer") +
+  labs(
+    title = "Inundation Change Categories",
+    subtitle = "Count of water supplies by category and buffer size",
+    x = NULL, y = "Count"
+  ) +
+  theme_minimal() +
+  theme(
+    text = element_text(family = "serif", color = "#2C3E50"),
+    plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(size = 11, hjust = 0.5, color = "#7F8C8D"),
+    axis.text = element_text(size = 10)
+  )
 ```
