@@ -160,7 +160,7 @@ slr_inundation_exp <- calc_inundation_exposure(
   verbose = TRUE         
 )
 
-# 122 minutes for 767 water sources, or 35 separate inundation regions
+# 140 minutes for ??? water sources, or 38 separate inundation regions
 ```
 
 # Sensitivity
