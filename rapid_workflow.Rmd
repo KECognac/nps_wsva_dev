@@ -146,25 +146,22 @@ runoff_exp <- calc_runoff_exposure(water_supplies = water_supplies,
 
 ```{r}
 # Read in water supply data with SLR projection information
-ws_slr_scenarios <- sf::st_read(here("data", "all", "coast_comp_data", 
-                                     "NOAA_SLRV_2022", "inundation_data",
-                                     "ws_inun_regions.gpkg")) %>%
+ws_slr_scenarios <- sf::st_read(here("data", "rapid", "inputs", "coast_comp", 
+                                     "buff_ws_inun_regions.gpkg")) %>%
   # Filter for water supplies that have relevant inundation surface information
   filter(!is.na(proj_file))
 
 slr_inundation_exp <- calc_inundation_exposure(
   water_supplies = ws_slr_scenarios, 
-  inundation_raster_data_dir = here("data", "all", "coast_comp_data", 
-                                    "NOAA_SLRV_2022", "Extent_Rasters"), 
+  inundation_raster_data_dir = here("data", "rapid", "inputs", "coast_comp", 
+                                    "Extent_Rasters"), 
   save = TRUE,            
-  output_dir = here("data", "all", "coast_comp_data", "NOAA_SLRV_2022", 
-                    "inundation_data"),      
+  output_dir = here("data", "rapid", "outputs"),      
   verbose = TRUE         
 )
 
-# 96 minutes for 752 water sources, or 34 separate inundation regions
+# 140 minutes for ??? water sources, or 38 separate inundation regions
 ```
-
 
 # Sensitivity
 
@@ -209,7 +206,6 @@ flood_sen <- calc_flood_risk(
 Filter to Utah parks for testing
 
 ```{r}
-
 # park boundaries and metadata
 parks_sub <- st_read("data/rapid/inputs/park_boundaries_2025-08-14.gpkg") %>% filter(STATE == "UT")
 

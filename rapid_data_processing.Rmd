@@ -90,6 +90,11 @@ if(!dir.exists("data/rapid/outputs")) {
   dir.create("data/rapid/outputs")
 }
 
+# folder for coastal component input datasets
+if(!dir.exists("data/rapid/inputs/coast_comp")) {
+  dir.create("data/rapid/inputs/coast_comp")
+}
+
 
 ```
 
@@ -179,9 +184,9 @@ walk(runoff_data, ~process_loca2_mwbm(.x,
 # Process Inundation Data Files
 
 ```{r}
-inundation_data <- process_inundation_data(water_supplies,
-                                           coast_dir_path = "data/all/coast_comp_data")
-
+inundation_data <- process_inundation_data(coast_dir_path = here("data", "all", "coast_comp_data"),
+                                           water_supplies = water_supplies,
+                                           output_dir = here("data", "rapid", "inputs", "coast_comp"))
 # took under 5 minutes
+# took about 33 minutes on JD's computer
 ```
-
