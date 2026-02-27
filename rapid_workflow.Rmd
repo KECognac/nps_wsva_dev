@@ -152,7 +152,7 @@ ws_slr_scenarios <- sf::st_read(here("data", "rapid", "inputs", "coast_comp",
   filter(!is.na(proj_file))
 
 slr_inundation_exp <- calc_inundation_exposure(
-  water_supplies = ws_slr_scenarios, 
+  ws_scenarios = ws_slr_scenarios, 
   inundation_raster_data_dir = here("data", "rapid", "inputs", "coast_comp", 
                                     "Extent_Rasters"), 
   save = TRUE,            
@@ -160,7 +160,7 @@ slr_inundation_exp <- calc_inundation_exposure(
   verbose = TRUE         
 )
 
-# 140 minutes for ??? water sources, or 38 separate inundation regions
+# 14 minutes for all water sources
 ```
 
 # Sensitivity
