@@ -145,22 +145,31 @@ runoff_exp <- calc_runoff_exposure(water_supplies = water_supplies,
 ## Sea Level Rise Inundation
 
 ```{r}
-# Read in water supply data with SLR projection information
-ws_slr_scenarios <- sf::st_read(here("data", "rapid", "inputs", "coast_comp", 
+# Read buffered water supply scenarios, filter to 4 km and valid inundation files
+ws_slr_scenarios <- sf::st_read(here("data", "rapid", "inputs", "coast_comp",
                                      "buff_ws_inun_regions.gpkg")) %>%
-  # Filter for water supplies that have relevant inundation surface information
-  filter(!is.na(proj_file))
+  filter(!is.na(proj_file), buffer_km == 4)
+
+# Right-join all water supplies onto ws_slr_scenarios:
+ws_all <- ws_slr_scenarios %>%
+  select(-park_unit) %>%
+  right_join(
+    water_supplies %>%
+      st_drop_geometry() %>%
+      select(wsd_source_id, park_unit),
+    by = "wsd_source_id"
+  )
 
 slr_inundation_exp <- calc_inundation_exposure(
-  ws_scenarios = ws_slr_scenarios, 
-  inundation_raster_data_dir = here("data", "rapid", "inputs", "coast_comp", 
-                                    "Extent_Rasters"), 
-  save = TRUE,            
-  output_dir = here("data", "rapid", "outputs"),      
-  verbose = TRUE         
+  ws_scenarios               = ws_all,
+  inundation_raster_data_dir = here("data", "rapid", "inputs", "coast_comp",
+                                    "Extent_Rasters"),
+  save       = TRUE,
+  output_dir = here("data", "rapid", "outputs"),
+  verbose    = TRUE
 )
 
-# 14 minutes for all water sources
+# 5 minutes for all water sources
 ```
 
 # Sensitivity
