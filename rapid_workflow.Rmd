@@ -126,21 +126,39 @@ fire_exp <- calc_fire_exposure(
 ## 38.6 seconds for 1151 parks
 ```
 
-## Runoff
+## Water Balance Model Factors
+
+### Runoff
 
 ```{r}
 runoff_exp <- calc_runoff_exposure(water_supplies = water_supplies,
-                                   runoff_data = "data/rapid/inputs/loca2_mwbm_runoff/",
+                                   runoff_data = "data/rapid/inputs/loca2_runoff_water_supplies/",
                                    hindcast = TRUE,
                                    historical = c("1995-01-01", "2024-12-31"),
                                    future = c("2035-01-01", "2065-12-31"),
-                                   save = FALSE,
-                                   output_dir = NULL,
+                                   save = TRUE,
+                                   output_dir = "data/rapid/outputs/",
                                    verbose = TRUE)
 
-# 7 minutes for 1148 water sources when hindcast = TRUE
-# 4 minutes for 1148 water sources when hindcast = FALSE
+# 7 minutes for 1412 water sources when hindcast = TRUE
+# 4 minutes for 1412 water sources when hindcast = FALSE
 ```
+
+### Precipitation
+
+```{r}
+precip_exp <- calc_precip_exposure(water_supplies = water_supplies,
+                                   precip_data = "data/rapid/inputs/loca2_precipitation_water_supplies/",
+                                   hindcast = TRUE,
+                                   historical = c("1995-01-01", "2024-12-31"),
+                                   future = c("2035-01-01", "2065-12-31"),
+                                   save = TRUE,
+                                   output_dir = "data/rapid/outputs/",
+                                   verbose = TRUE)
+
+# 7 minutes for 1412 water sources when hindcast = TRUE
+```
+
 
 ## Sea Level Rise Inundation
 
@@ -207,6 +225,67 @@ flood_sen <- calc_flood_risk(
 )
 # took 2.83 hours for 1411 water supplies
 ```
+
+## Water Balance Model Factors
+
+### Runoff
+
+Historical LOCA runoff data goes up to 2010:
+
+```{r}
+runoff_sen <- calc_runoff_sensitivity(water_supplies,
+                                      runoff_data = "data/rapid/inputs/loca2_runoff_water_supplies/",
+                                      historical = c("1980-01-01", "2010-12-31"), 
+                                      save = TRUE,
+                                      output_dir = "data/rapid/outputs/",
+                                      verbose = TRUE) %>%
+  # additional metadata, don't necessarily need but interesting to review as we finalize indicator
+  select(-c(n_years, trend_direction, mk_significant))
+```
+
+### Precipitation
+
+Historical LOCA precip data goes up to 2018:
+
+```{r}
+precip_sen <- calc_precip_sensitivity(water_supplies,
+                                      precip_data = "data/rapid/inputs/loca2_precipitation_water_supplies/",
+                                      historical = c("1980-01-01", "2018-12-31"),
+                                      save = TRUE,
+                                      output_dir = "data/rapid/outputs/",
+                                      verbose = TRUE) %>%
+    # additional metadata, don't necessarily need but interesting to review as we finalize indicator
+  select(-c(n_years, trend_direction, mk_significant))
+```
+
+## Water Withdrawal Competetion
+
+Data currently from USFS compilation of all USGS data use data by county:
+
+```{r}
+nearby_use_sen <- calc_nearby_use_sensitivity(water_supplies,
+                                                observed_use = fread("data/all/RPAWaterDemand/1_BaseData/Trash 2022/usgswithdrawals.csv"),
+                                                save = TRUE,
+                                                output_dir = "data/rapid/outputs/",
+                                                verbose = TRUE) %>%
+      # additional metadata, don't necessarily need but some are interesting to review as we finalize indicator
+  select(-c(state_name, county_nm, fips, n_years, mk_significant, trend_direction, geometry))
+
+```
+
+## Visitation
+
+```{r}
+visitation_sen <- calc_visitation_sensitivity(water_supplies,
+                                              start_year = 1990,
+                                              end_year = 2024,
+                                              save = TRUE,
+                                              output_dir = "data/rapid/outputs/",
+                                              verbose = TRUE) %>%
+  # additional metadata, don't necessarily need but some are interesting to review as we finalize indicator
+  select(-c(mk_tau, mk_p_value, trend_direction, n_years, time_range, peak_year))
+```
+
 
 ------------------------------------------------------------------------
 
