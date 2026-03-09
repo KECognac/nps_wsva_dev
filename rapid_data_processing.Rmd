@@ -206,5 +206,4 @@ inundation_data <- process_inundation_data(coast_dir_path = here("data", "all", 
                                            water_supplies = water_supplies,
                                            output_dir = here("data", "rapid", "inputs", "coast_comp"))
 # took under 5 minutes
-# took about 33 minutes on JD's computer
 ```
