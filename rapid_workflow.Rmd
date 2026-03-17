@@ -255,7 +255,7 @@ precip_sen <- calc_precip_sensitivity(water_supplies,
                                       save = TRUE,
                                       output_dir = "data/rapid/outputs/",
                                       verbose = TRUE) %>%
-    # additional metadata, don't necessarily need but interesting to review as we finalize indicator
+  # additional metadata, don't necessarily need but interesting to review as we finalize indicator
   select(-c(n_years, trend_direction, mk_significant))
 ```
 
@@ -265,12 +265,15 @@ Data currently from USFS compilation of all USGS data use data by county:
 
 ```{r}
 nearby_use_sen <- calc_nearby_use_sensitivity(water_supplies,
-                                                observed_use = fread("data/all/RPAWaterDemand/1_BaseData/Trash 2022/usgswithdrawals.csv"),
-                                                save = TRUE,
-                                                output_dir = "data/rapid/outputs/",
-                                                verbose = TRUE) %>%
-      # additional metadata, don't necessarily need but some are interesting to review as we finalize indicator
-  select(-c(state_name, county_nm, fips, n_years, mk_significant, trend_direction, geometry))
+                                              observed_use = fread("data/all/RPAWaterDemand/1_BaseData/Trash 2022/usgswithdrawals.csv"),
+                                              save = TRUE,
+                                              output_dir = "data/rapid/outputs/",
+                                              verbose = TRUE) %>%
+  # additional metadata exists, don't necessarily need but some are interesting to review as we finalize indicator
+  select(wsd_source_id, park_unit,
+         raw_avg_nearby_use_per_km2, raw_percent_slope_nearby_use_per_km2, 
+         rank_avg_nearby_use_per_km2, rank_percent_slope_nearby_use_per_km2, 
+         norm_avg_nearby_use_per_km2, norm_percent_slope_nearby_use_per_km2)
 
 ```
 
@@ -283,8 +286,11 @@ visitation_sen <- calc_visitation_sensitivity(water_supplies,
                                               save = TRUE,
                                               output_dir = "data/rapid/outputs/",
                                               verbose = TRUE) %>%
-  # additional metadata, don't necessarily need but some are interesting to review as we finalize indicator
-  select(-c(mk_tau, mk_p_value, trend_direction, n_years, time_range, peak_year))
+  # additional metadata exists, don't necessarily need but some are interesting to review as we finalize indicator
+  select(wsd_source_id, park_unit,
+         raw_avg_visitation, raw_scaled_trend_visitation,
+         rank_avg_visitation, rank_scaled_trend_visitation,
+         norm_avg_visitation, norm_scaled_trend_visitation)
 ```
 
 
