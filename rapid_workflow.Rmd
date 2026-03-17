@@ -259,7 +259,7 @@ precip_sen <- calc_precip_sensitivity(water_supplies,
   select(-c(n_years, trend_direction, mk_significant))
 ```
 
-## Water Withdrawal Competetion
+## Water Withdrawal Competition
 
 Data currently from USFS compilation of all USGS data use data by county:
 
