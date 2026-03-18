@@ -297,19 +297,23 @@ scenario; red points had measurable inundation. The inundation region bounding
 boxes are shown for spatial reference.
 
 ```{r}
-ws_centroids <- all_buffer_ws %>%
+join_buff <- all_buffer_ws %>%
   filter(buffer_km == 4) %>%
-  st_centroid() %>%
+  select(wsd_source_id) %>%
+  distinct(wsd_source_id, .keep_all = TRUE)
+
+ws_centroids <- join_buff %>%
   left_join(
     official_slr_inun_exp %>%
       filter(buffer_km == 4 | is.na(buffer_km)) %>%
-      select(wsd_source_id, raw_coverage_pct_ref),
+      select(wsd_source_id, raw_coverage_pct_ref, raw_coverage_pct_proj),
     by = "wsd_source_id"
   ) %>%
+  st_centroid() %>%
   mutate(risk_category = case_when(
-    is.na(raw_coverage_pct_ref)  ~ "Not in analysis",
-    raw_coverage_pct_ref == 0    ~ "In analysis, no risk",
-    TRUE                         ~ "In analysis, at risk"
+    is.na(raw_coverage_pct_ref) ~ "Not in analysis",
+    raw_coverage_pct_ref == 0   ~ "In analysis, no risk",
+    TRUE                        ~ "In analysis, at risk"
   ))
 ```
 
