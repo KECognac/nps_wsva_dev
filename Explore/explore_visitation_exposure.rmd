@@ -528,15 +528,12 @@ compare_trend_methods(park_unit = "FRST")  # Replace with actual park code
 Park visitation trends
 
 ```{r, echo = FALSE}
-sample_park_visitation <- park_visitation %>% 
-  filter(park_unit != "HATU")
-
-mapview(sample_park_visitation,
+mapview(park_visitation,
   zcol = "visit_raw_pct_change",
   layer.name = "Percent Increase in Visitation: 2024-2050",
   col.regions = colorRampPalette(c("yellow", "orange", "red")))
 # decreasing percent means visitor window is shrinking
-mapview(sample_park_visitation,
+mapview(park_visitation,
         zcol = "visit_raw_cv_change",
         layer.name = "Percent Change in Visitor Window: 2024-2050",
         col.regions = colorRampPalette(c("black", "red", "orange", "yellow"))(50))
