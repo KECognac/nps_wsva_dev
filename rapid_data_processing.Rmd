@@ -217,5 +217,6 @@ process_CUSP_data(
   cusp_dir_path = here("data", "all", "coast_comp_data", "NOAA_CUSP"),
   output_dir    = here("data", "rapid", "inputs", "coast_comp")
 )
+# took 2 minutes
 ```
 
