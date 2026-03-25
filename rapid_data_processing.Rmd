@@ -207,3 +207,15 @@ inundation_data <- process_inundation_data(coast_dir_path = here("data", "all", 
                                            output_dir = here("data", "rapid", "inputs", "coast_comp"))
 # took under 5 minutes
 ```
+
+# CUSP Data
+
+Combine all NOAA CUSP shoreline tiles into a single GeoPackage for use by `calc_inundation_sensitivity()`.
+
+```{r}
+process_CUSP_data(
+  cusp_dir_path = here("data", "all", "coast_comp_data", "NOAA_CUSP"),
+  output_dir    = here("data", "rapid", "inputs", "coast_comp")
+)
+```
+
