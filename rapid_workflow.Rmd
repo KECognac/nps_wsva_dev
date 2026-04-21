@@ -134,8 +134,9 @@ fire_exp <- calc_fire_exposure(
 runoff_exp <- calc_runoff_exposure(water_supplies = water_supplies,
                                    runoff_data = "data/rapid/inputs/loca2_runoff_water_supplies/",
                                    hindcast = TRUE,
-                                   historical = c("1995-01-01", "2024-12-31"),
-                                   future = c("2035-01-01", "2065-12-31"),
+                                   historical = c(1995, 2024),
+                                   future = c(2035, 2065),
+                                   water_year = TRUE,
                                    save = TRUE,
                                    output_dir = "data/rapid/outputs/",
                                    verbose = TRUE)
@@ -150,8 +151,9 @@ runoff_exp <- calc_runoff_exposure(water_supplies = water_supplies,
 precip_exp <- calc_precip_exposure(water_supplies = water_supplies,
                                    precip_data = "data/rapid/inputs/loca2_precipitation_water_supplies/",
                                    hindcast = TRUE,
-                                   historical = c("1995-01-01", "2024-12-31"),
-                                   future = c("2035-01-01", "2065-12-31"),
+                                   historical = c(1995, 2024),
+                                   future = c(2035, 2065),
+                                   water_year = TRUE,
                                    save = TRUE,
                                    output_dir = "data/rapid/outputs/",
                                    verbose = TRUE)
@@ -160,6 +162,21 @@ precip_exp <- calc_precip_exposure(water_supplies = water_supplies,
 # 19 minutes for 1412 water sources when hindcast = FALSE (observed data is daily!)
 ```
 
+### Snow Water Equivalent (SWE)
+
+```{r}
+swe_exp <- calc_swe_exposure(water_supplies = water_supplies,
+                             swe_data = "data/rapid/inputs/loca2_swe_water_supplies/",
+                             hindcast = TRUE,
+                             historical = c(1995, 2024),
+                             future = c(2035, 2065),
+                             water_year = TRUE,
+                             save = TRUE,
+                             output_dir = "data/rapid/outputs/",
+                             verbose = TRUE)
+
+# 9.5 minutes for 1148 water sources when hindcast = TRUE
+```
 
 ## Sea Level Rise Inundation
 
@@ -188,7 +205,7 @@ slr_inundation_exp <- calc_inundation_exposure(
   verbose    = TRUE
 )
 
-# 15 minutes for all water sources
+# 5 minutes for all water sources
 ```
 
 # Sensitivity
@@ -251,7 +268,8 @@ Historical LOCA runoff data goes up to 2010:
 ```{r}
 runoff_sen <- calc_runoff_sensitivity(water_supplies,
                                       runoff_data = "data/rapid/inputs/loca2_runoff_water_supplies/",
-                                      historical = c("1980-01-01", "2010-12-31"), 
+                                      historical = c(1980, 2010), 
+                                      water_year = TRUE,
                                       save = TRUE,
                                       output_dir = "data/rapid/outputs/",
                                       verbose = TRUE) %>%
@@ -266,13 +284,31 @@ Historical LOCA precip data goes up to 2018:
 ```{r}
 precip_sen <- calc_precip_sensitivity(water_supplies,
                                       precip_data = "data/rapid/inputs/loca2_precipitation_water_supplies/",
-                                      historical = c("1980-01-01", "2018-12-31"),
+                                      historical = c(1980, 2018),
+                                      water_year = TRUE,
                                       save = TRUE,
                                       output_dir = "data/rapid/outputs/",
                                       verbose = TRUE) %>%
   # additional metadata, don't necessarily need but interesting to review as we finalize indicator
   select(-c(n_years, trend_direction, mk_significant))
 ```
+
+### Snow Water Equivalent (SWE)
+
+Historical LOCA SWE data goes up to 2010:
+
+```{r}
+swe_sen <- calc_swe_sensitivity(water_supplies,
+                                swe_data = "data/rapid/inputs/loca2_swe_water_supplies/",
+                                historical = c(1980, 2010),
+                                water_year = TRUE,
+                                save = TRUE,
+                                output_dir = "data/rapid/outputs/",
+                                verbose = TRUE) %>%
+  # additional metadata, don't necessarily need but interesting to review as we finalize indicator
+  select(-c(n_years, trend_direction, mk_significant))
+```
+
 
 ## Water Withdrawal Competition
 
