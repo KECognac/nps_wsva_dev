@@ -25,39 +25,39 @@ park_centroids <- parks %>%
 Read in water supply database for filtered parks
 
 ```{r}
-table_path <- "data/Water_Supply_Systems/NPS_Water_Systems_Database_Joined.xlsx"
+water_supplies <- get_wsd(rapid = TRUE) 
 
-
-water_supplies <- read_excel(table_path,
-                             sheet = 1,
-                             na = c("NA", "U"),
-                             skip = 1) %>%
-  dplyr::mutate(
-    source_longitude = as.numeric(source_longitude),
-    source_latitude = as.numeric(source_latitude)
-  ) %>%
-  filter(!state %in% c("AK", "AS", "HI", "MP", "PR", "VI")) %>%
-  left_join(
-    park_centroids %>% 
-      st_drop_geometry() %>% 
-      dplyr::select(UNIT_CODE, x, y),
-    by = c(park_unit = "UNIT_CODE")
-  ) %>% dplyr::mutate(
-    coords_flag = ifelse(
-      is.na(source_longitude) |
-        is.na(source_latitude),
-      "Centroid",
-      "Source Coordinates"
-    ),
-    source_longitude = ifelse(is.na(source_longitude), x, source_longitude),
-    source_latitude = ifelse(is.na(source_latitude), y, source_latitude)
-  ) %>%
-  # remove municipal and hauled source types, accounting for database entry errors
-  filter(!str_detect(source_type, regex("municipal|hauled", ignore_case = TRUE))) %>%
-  drop_na(source_longitude, source_latitude) %>%
-  st_as_sf(coords = (c("source_longitude", "source_latitude")),
-           crs = 4326,
-           remove = FALSE)
+# table_path <- "data/Water_Supply_Systems/NPS_Water_Systems_Database_Joined.xlsx"
+# water_supplies <- read_excel(table_path,
+#                              sheet = 1,
+#                              na = c("NA", "U"),
+#                              skip = 1) %>%
+#   dplyr::mutate(
+#     source_longitude = as.numeric(source_longitude),
+#     source_latitude = as.numeric(source_latitude)
+#   ) %>%
+#   filter(!state %in% c("AK", "AS", "HI", "MP", "PR", "VI")) %>%
+#   left_join(
+#     park_centroids %>% 
+#       st_drop_geometry() %>% 
+#       dplyr::select(UNIT_CODE, x, y),
+#     by = c(park_unit = "UNIT_CODE")
+#   ) %>% dplyr::mutate(
+#     coords_flag = ifelse(
+#       is.na(source_longitude) |
+#         is.na(source_latitude),
+#       "Centroid",
+#       "Source Coordinates"
+#     ),
+#     source_longitude = ifelse(is.na(source_longitude), x, source_longitude),
+#     source_latitude = ifelse(is.na(source_latitude), y, source_latitude)
+#   ) %>%
+#   # remove municipal and hauled source types, accounting for database entry errors
+#   filter(!str_detect(source_type, regex("municipal|hauled", ignore_case = TRUE))) %>%
+#   drop_na(source_longitude, source_latitude) %>%
+#   st_as_sf(coords = (c("source_longitude", "source_latitude")),
+#            crs = 4326,
+#            remove = FALSE)
 
 
 ```
