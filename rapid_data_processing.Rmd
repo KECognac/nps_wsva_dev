@@ -178,7 +178,7 @@ walk(runoff_data, ~process_loca2_mwbm(.x,
                                       water_supplies = water_supplies %>% select(park_unit, wsd_source_id), 
                                       var = "runoff",
                                       historical = c("1980-01-01", "2024-12-31"),
-                                      future = c("2035-01-01", "2065-12-31")))
+                                      future = c("2025-01-01", "2100-12-31")))
 
 # took 24 minutes
 ```
@@ -189,15 +189,48 @@ walk(runoff_data, ~process_loca2_mwbm(.x,
 precip_data <- list.files("data/all/loca2_mwbm/", full.names = TRUE, pattern = "pr_|precip|pr.")
 
 # Process all NetCDF files using helper function
-walk(precip_data, ~process_loca2_mwbm(.x, 
+walk(precip_data, ~try(process_loca2_mwbm(.x, 
                                       output_dir = "data/rapid/inputs/loca2_precipitation_water_supplies/", 
                                       water_supplies = water_supplies %>% select(park_unit, wsd_source_id), 
                                       var = "pr",
                                       historical = c("1980-01-01", "2024-12-31"),
-                                      future = c("2035-01-01", "2065-12-31")))
+                                      future = c("2025-01-01", "2100-12-31"))))
 
 # took 57 minutes
 ```
+
+### Snow Water Equivalent
+
+```{r}
+snow_data <- grep("livneh", list.files("data/all/loca2_mwbm/", full.names = TRUE, pattern = "snow"), value = TRUE, invert = TRUE)
+
+# Process all NetCDF files using helper function
+walk(snow_data, ~process_loca2_mwbm(.x, 
+                                    output_dir = "data/rapid/inputs/loca2_swe_water_supplies/", 
+                                    water_supplies = water_supplies %>% select(park_unit, wsd_source_id), 
+                                    var = "swe",
+                                    historical = c("1980-01-01", "2024-12-31"),
+                                    future = c("2025-01-01", "2100-12-31")))
+
+# took 57 minutes
+```
+
+### PET
+
+```{r}
+pet_data <- list.files("data/all/loca2_mwbm/", full.names = TRUE, pattern = "pet_")
+
+# Process all NetCDF files using helper function
+walk(pet_data, ~process_loca2_mwbm(.x, 
+                                   output_dir = "data/rapid/inputs/loca2_pet_water_supplies/", 
+                                   water_supplies = water_supplies %>% select(park_unit, wsd_source_id), 
+                                   var = "pet",
+                                   historical = c("1980-01-01", "2024-12-31"),
+                                   future = c("2025-01-01", "2100-12-31")))
+
+# took 24 minutes
+```
+
 
 # Process Inundation Data Files
 
