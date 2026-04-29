@@ -25,39 +25,39 @@ park_centroids <- parks %>%
 Read in water supply database for filtered parks
 
 ```{r}
-table_path <- "data/Water_Supply_Systems/NPS_Water_Systems_Database_Joined.xlsx"
+water_supplies <- get_wsd(rapid = TRUE) 
 
-
-water_supplies <- read_excel(table_path,
-                             sheet = 1,
-                             na = c("NA", "U"),
-                             skip = 1) %>%
-  dplyr::mutate(
-    source_longitude = as.numeric(source_longitude),
-    source_latitude = as.numeric(source_latitude)
-  ) %>%
-  filter(!state %in% c("AK", "AS", "HI", "MP", "PR", "VI")) %>%
-  left_join(
-    park_centroids %>% 
-      st_drop_geometry() %>% 
-      dplyr::select(UNIT_CODE, x, y),
-    by = c(park_unit = "UNIT_CODE")
-  ) %>% dplyr::mutate(
-    coords_flag = ifelse(
-      is.na(source_longitude) |
-        is.na(source_latitude),
-      "Centroid",
-      "Source Coordinates"
-    ),
-    source_longitude = ifelse(is.na(source_longitude), x, source_longitude),
-    source_latitude = ifelse(is.na(source_latitude), y, source_latitude)
-  ) %>%
-  # remove municipal and hauled source types, accounting for database entry errors
-  filter(!str_detect(source_type, regex("municipal|hauled", ignore_case = TRUE))) %>%
-  drop_na(source_longitude, source_latitude) %>%
-  st_as_sf(coords = (c("source_longitude", "source_latitude")),
-           crs = 4326,
-           remove = FALSE)
+# table_path <- "data/Water_Supply_Systems/NPS_Water_Systems_Database_Joined.xlsx"
+# water_supplies <- read_excel(table_path,
+#                              sheet = 1,
+#                              na = c("NA", "U"),
+#                              skip = 1) %>%
+#   dplyr::mutate(
+#     source_longitude = as.numeric(source_longitude),
+#     source_latitude = as.numeric(source_latitude)
+#   ) %>%
+#   filter(!state %in% c("AK", "AS", "HI", "MP", "PR", "VI")) %>%
+#   left_join(
+#     park_centroids %>% 
+#       st_drop_geometry() %>% 
+#       dplyr::select(UNIT_CODE, x, y),
+#     by = c(park_unit = "UNIT_CODE")
+#   ) %>% dplyr::mutate(
+#     coords_flag = ifelse(
+#       is.na(source_longitude) |
+#         is.na(source_latitude),
+#       "Centroid",
+#       "Source Coordinates"
+#     ),
+#     source_longitude = ifelse(is.na(source_longitude), x, source_longitude),
+#     source_latitude = ifelse(is.na(source_latitude), y, source_latitude)
+#   ) %>%
+#   # remove municipal and hauled source types, accounting for database entry errors
+#   filter(!str_detect(source_type, regex("municipal|hauled", ignore_case = TRUE))) %>%
+#   drop_na(source_longitude, source_latitude) %>%
+#   st_as_sf(coords = (c("source_longitude", "source_latitude")),
+#            crs = 4326,
+#            remove = FALSE)
 
 
 ```
@@ -134,8 +134,9 @@ fire_exp <- calc_fire_exposure(
 runoff_exp <- calc_runoff_exposure(water_supplies = water_supplies,
                                    runoff_data = "data/rapid/inputs/loca2_runoff_water_supplies/",
                                    hindcast = TRUE,
-                                   historical = c("1995-01-01", "2024-12-31"),
-                                   future = c("2035-01-01", "2065-12-31"),
+                                   historical = c(1995, 2024),
+                                   future = c(2035, 2065),
+                                   water_year = TRUE,
                                    save = TRUE,
                                    output_dir = "data/rapid/outputs/",
                                    verbose = TRUE)
@@ -150,14 +151,31 @@ runoff_exp <- calc_runoff_exposure(water_supplies = water_supplies,
 precip_exp <- calc_precip_exposure(water_supplies = water_supplies,
                                    precip_data = "data/rapid/inputs/loca2_precipitation_water_supplies/",
                                    hindcast = TRUE,
-                                   historical = c("1995-01-01", "2024-12-31"),
-                                   future = c("2035-01-01", "2065-12-31"),
+                                   historical = c(1995, 2024),
+                                   future = c(2035, 2065),
+                                   water_year = TRUE,
                                    save = TRUE,
                                    output_dir = "data/rapid/outputs/",
                                    verbose = TRUE)
 
 # 7 minutes for 1412 water sources when hindcast = TRUE
 # 19 minutes for 1412 water sources when hindcast = FALSE (observed data is daily!)
+```
+
+### Snow Water Equivalent (SWE)
+
+```{r}
+swe_exp <- calc_swe_exposure(water_supplies = water_supplies,
+                             swe_data = "data/rapid/inputs/loca2_swe_water_supplies/",
+                             hindcast = TRUE,
+                             historical = c(1995, 2024),
+                             future = c(2035, 2065),
+                             water_year = TRUE,
+                             save = TRUE,
+                             output_dir = "data/rapid/outputs/",
+                             verbose = TRUE)
+
+# 9.5 minutes for 1148 water sources when hindcast = TRUE
 ```
 
 ## Sea Level Rise Inundation
@@ -187,7 +205,7 @@ slr_inundation_exp <- calc_inundation_exposure(
   verbose    = TRUE
 )
 
-# 15 minutes for all water sources
+# 5 minutes for all water sources
 ```
 
 # Sensitivity
@@ -250,7 +268,8 @@ Historical LOCA runoff data goes up to 2010:
 ```{r}
 runoff_sen <- calc_runoff_sensitivity(water_supplies,
                                       runoff_data = "data/rapid/inputs/loca2_runoff_water_supplies/",
-                                      historical = c("1980-01-01", "2010-12-31"), 
+                                      historical = c(1980, 2010), 
+                                      water_year = TRUE,
                                       save = TRUE,
                                       output_dir = "data/rapid/outputs/",
                                       verbose = TRUE) %>%
@@ -265,13 +284,31 @@ Historical LOCA precip data goes up to 2018:
 ```{r}
 precip_sen <- calc_precip_sensitivity(water_supplies,
                                       precip_data = "data/rapid/inputs/loca2_precipitation_water_supplies/",
-                                      historical = c("1980-01-01", "2018-12-31"),
+                                      historical = c(1980, 2018),
+                                      water_year = TRUE,
                                       save = TRUE,
                                       output_dir = "data/rapid/outputs/",
                                       verbose = TRUE) %>%
   # additional metadata, don't necessarily need but interesting to review as we finalize indicator
   select(-c(n_years, trend_direction, mk_significant))
 ```
+
+### Snow Water Equivalent (SWE)
+
+Historical LOCA SWE data goes up to 2010:
+
+```{r}
+swe_sen <- calc_swe_sensitivity(water_supplies,
+                                swe_data = "data/rapid/inputs/loca2_swe_water_supplies/",
+                                historical = c(1980, 2010),
+                                water_year = TRUE,
+                                save = TRUE,
+                                output_dir = "data/rapid/outputs/",
+                                verbose = TRUE) %>%
+  # additional metadata, don't necessarily need but interesting to review as we finalize indicator
+  select(-c(n_years, trend_direction, mk_significant))
+```
+
 
 ## Water Withdrawal Competition
 

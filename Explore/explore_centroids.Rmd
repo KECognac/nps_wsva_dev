@@ -1,0 +1,192 @@
+---
+title: "Exploring Park Centroids"
+author: "Katie Willi"
+date: "2025-12-18"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+```{r}
+library(igraph) # only necessary for this exercise
+library(DT) # only necessary for this exercise
+source("setup.R")
+```
+
+#### Creating park "centroids"
+
+When a park unit contains multiple locations like the Manhattan Project National Historic Park, centroid creation is inappropriate:
+
+```{r}
+parks <- getParkSystem()
+
+mapr_centroid <- parks %>%
+  filter(UNIT_CODE == "MAPR") %>%
+  st_centroid()
+
+mapr_boundary <- parks %>%
+  filter(UNIT_CODE == "MAPR")
+
+mapview(mapr_boundary, lwd = 15, col.region = "red", color = "red") + mapview(mapr_centroid)
+```
+
+So, we can "explode" any multipolygon into a single feature. But, some of these units get separated "too" much, see examples of Rocky Mountain and Acadia:
+
+```{r}
+# grab CONUS parks
+units_poly <- getParkSystem() %>% 
+  # remove non-CONUS
+  filter(!is.na(STATE) & !STATE %in% c("AK", "HI", "PR", "AS", "GU", "MP", "VI"),
+         # Dry Tortugas not often included in CONUS datasets (too far off the Florida mainland)
+         UNIT_CODE != "DRTO") %>% 
+  st_cast("POLYGON") %>% 
+  st_transform(5070)   # convert to meters projection
+
+# group by park and "split"
+exploded <- units_poly %>% 
+  dplyr::group_split(UNIT_CODE)
+
+romo_boundary <- exploded %>%
+  rbindlist() %>%
+  filter(UNIT_CODE == "ROMO") %>%
+  st_as_sf() %>%
+  rowid_to_column() %>% mutate(rowid = as.character(rowid))
+
+mapview(romo_boundary, zcol = "rowid")
+
+acad_boundary <- exploded %>%
+  rbindlist() %>% 
+  filter(UNIT_CODE == "ACAD") %>%
+  st_as_sf() %>%
+  rowid_to_column() %>% mutate(rowid = as.character(rowid))
+
+mapview(acad_boundary, zcol = "rowid")
+```
+
+Therefore, I "regroup" split boundaries that are within 15 km of each other (15km is arbitrary):
+
+```{r}
+#so, cluster polygons within 15 km
+# clustered <- exploded %>% 
+#   map_dfr(function(p) {
+#     # find which same UNIT_CODE polygons are within 15km of each other:
+#     nb <- sf::st_is_within_distance(p, p, dist = 15000)
+#     # turn that into a graph and get connected components (AI suggestion):
+#     g <- igraph::graph_from_adj_list(nb, mode = "all")
+#     comp <- igraph::components(g)$membership
+#     p$cluster_id <- comp
+#     return(p)
+#   })
+
+
+clustered <- exploded %>%
+  map_dfr(function(p) {
+    # If a park only has 1 polygon, don't waste time on it
+    if(nrow(p) <= 1) {
+      p$cluster_id <- 1
+      return(p)
+    }
+    
+    # SPEED FIX: Use a simplified version of the geometry just for the distance check
+    p_sim <- st_simplify(p, dTolerance = 5)
+    
+    nb <- sf::st_is_within_distance(p_sim, dist = 15000)
+    
+    g <- igraph::graph_from_adj_list(nb)
+    p$cluster_id <- igraph::components(g)$membership
+    return(p)
+  })
+
+# within each cluster (per park)
+units_clustered <- clustered %>% 
+  group_by(UNIT_CODE, cluster_id) %>% 
+  summarize(do_union = TRUE, .groups = "drop") %>% 
+  st_cast("MULTIPOLYGON") %>% 
+  # st_transform(st_crs(getParkSystem())) %>%
+  mutate(cluster_id = as.character(cluster_id))
+```
+
+Next, we explore how to grab appropriate point locations that are the best representation of these park units. Centroids are most obvious, but can be a location outside the park boundary. We could instead use st_point_on_surface(), which guarantees it falls within polygon boundary:
+
+```{r}
+centroids <- units_clustered %>%
+  st_centroid() %>%
+  filter(UNIT_CODE == "ROMO")
+
+pseudo_centroids <- units_clustered %>%
+  st_point_on_surface() %>%
+  filter(UNIT_CODE == "ROMO")
+
+mapview(pseudo_centroids, col.regions = "blue") + mapview(centroids, col.regions = "pink") +
+  mapview(units_clustered %>% filter(UNIT_CODE == "ROMO"), layer.name = "ROMO")
+
+centroids <- units_clustered %>%
+  st_centroid() %>%
+  filter(UNIT_CODE == "ACAD")
+
+pseudo_centroids <- units_clustered %>%
+  st_point_on_surface() %>%
+  filter(UNIT_CODE == "ACAD")
+
+mapview(pseudo_centroids, col.regions = "blue") + mapview(centroids, col.regions = "pink") +
+  mapview(units_clustered %>% filter(UNIT_CODE == "ACAD"), zcol = "cluster_id", layer.name = "ACAD")
+
+centroids <- units_clustered %>%
+  st_centroid() %>%
+  filter(UNIT_CODE == "NIOB")
+
+pseudo_centroids <- units_clustered %>%
+  st_point_on_surface() %>%
+  filter(UNIT_CODE == "NIOB")
+
+mapview(pseudo_centroids, col.regions = "blue") + mapview(centroids, col.regions = "pink") +
+  mapview(units_clustered %>% filter(UNIT_CODE == "NIOB"), layer.name = "NIOB")
+
+centroids <- units_clustered %>%
+  st_centroid() %>%
+  filter(UNIT_CODE == "OBRI")
+
+pseudo_centroids <- units_clustered %>%
+  st_point_on_surface() %>%
+  filter(UNIT_CODE == "OBRI")
+
+mapview(pseudo_centroids, col.regions = "blue") + mapview(centroids, col.regions = "pink") +
+  mapview(units_clustered %>% filter(UNIT_CODE == "OBRI"), layer.name = "OBRI")
+```
+
+#### Comparing to CCRP centroids
+
+It looks like they removed portions of park boundaries where their distances created a problem, like Manhattan Project, but the point also does not appear to be created from the "centroid" nor the "st_point_on_surface"... 🤔
+
+```{r}
+ccrp_centroids <- read_csv("data/CCRP_automated_climate_futures/spatial-data/centroid_county.csv") %>%
+  st_as_sf(., coords = c("Lon", "Lat"), crs = 4326) 
+
+mapview(ccrp_centroids %>% filter(UNIT_CODE == "MAPR"), layer.name = "CCRP", col.region = "brown") + 
+  mapview(units_clustered %>% filter(UNIT_CODE == "MAPR") %>% st_point_on_surface(), layer.name = "CSU Pseudo-Centroid") +
+  mapview(units_clustered %>% filter(UNIT_CODE == "MAPR") %>% st_centroid(), col.region = "magenta", layer.name = "CSU Centroid") +
+  mapview(units_clustered %>% filter(UNIT_CODE == "MAPR"), zcol = "cluster_id", layer.name = "MAPR")
+
+mapview(ccrp_centroids %>% filter(UNIT_CODE == "ACAD"), layer.name = "CCRP", col.region = "brown") + 
+  mapview(units_clustered %>% filter(UNIT_CODE == "ACAD") %>% st_point_on_surface(), layer.name = "CSU Pseudo-Centroid") +
+  mapview(units_clustered %>% filter(UNIT_CODE == "ACAD") %>% st_centroid(), col.region = "magenta", layer.name = "CSU Centroid") +
+  mapview(units_clustered %>% filter(UNIT_CODE == "ACAD"), zcol = "cluster_id", layer.name = "ACAD")
+
+mapview(ccrp_centroids %>% filter(UNIT_CODE == "THRO"), layer.name = "CCRP", col.region = "brown") + 
+  mapview(units_clustered %>% filter(UNIT_CODE == "THRO") %>% st_point_on_surface(), layer.name = "CSU Pseudo-Centroid") +
+  mapview(units_clustered %>% filter(UNIT_CODE == "THRO") %>% st_centroid(), col.region = "magenta", layer.name = "CSU Centroid") +
+  mapview(units_clustered %>% filter(UNIT_CODE == "THRO"), zcol = "cluster_id", layer.name = "THRO")
+```
+
+Their CCRP park centroid layer is also missing some parks:
+
+```{r}
+missing_parks <- parks %>%
+  filter(!UNIT_CODE %in% ccrp_centroids$UNIT_CODE) 
+
+DT::datatable(missing_parks %>%
+                distinct(UNIT_NAME, .keep_all = TRUE) %>%
+                select(UNIT_NAME, UNIT_CODE))
+```
