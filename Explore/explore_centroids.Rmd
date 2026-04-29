@@ -61,7 +61,7 @@ acad_boundary <- exploded %>%
   filter(UNIT_CODE == "ACAD") %>%
   st_as_sf() %>%
   rowid_to_column() %>% mutate(rowid = as.character(rowid))
-  
+
 mapview(acad_boundary, zcol = "rowid")
 ```
 
@@ -69,14 +69,33 @@ Therefore, I "regroup" split boundaries that are within 15 km of each other (15k
 
 ```{r}
 #so, cluster polygons within 15 km
-clustered <- exploded %>% 
+# clustered <- exploded %>% 
+#   map_dfr(function(p) {
+#     # find which same UNIT_CODE polygons are within 15km of each other:
+#     nb <- sf::st_is_within_distance(p, p, dist = 15000)
+#     # turn that into a graph and get connected components (AI suggestion):
+#     g <- igraph::graph_from_adj_list(nb, mode = "all")
+#     comp <- igraph::components(g)$membership
+#     p$cluster_id <- comp
+#     return(p)
+#   })
+
+
+clustered <- exploded %>%
   map_dfr(function(p) {
-    # find which same UNIT_CODE polygons are within 15km of each other:
-    nb <- sf::st_is_within_distance(p, p, dist = 15000)
-    # turn that into a graph and get connected components (AI suggestion):
-    g <- igraph::graph_from_adj_list(nb, mode = "all")
-    comp <- igraph::components(g)$membership
-    p$cluster_id <- comp
+    # If a park only has 1 polygon, don't waste time on it
+    if(nrow(p) <= 1) {
+      p$cluster_id <- 1
+      return(p)
+    }
+    
+    # SPEED FIX: Use a simplified version of the geometry just for the distance check
+    p_sim <- st_simplify(p, dTolerance = 5)
+    
+    nb <- sf::st_is_within_distance(p_sim, dist = 15000)
+    
+    g <- igraph::graph_from_adj_list(nb)
+    p$cluster_id <- igraph::components(g)$membership
     return(p)
   })
 
@@ -147,18 +166,18 @@ ccrp_centroids <- read_csv("data/CCRP_automated_climate_futures/spatial-data/cen
 
 mapview(ccrp_centroids %>% filter(UNIT_CODE == "MAPR"), layer.name = "CCRP", col.region = "brown") + 
   mapview(units_clustered %>% filter(UNIT_CODE == "MAPR") %>% st_point_on_surface(), layer.name = "CSU Pseudo-Centroid") +
-   mapview(units_clustered %>% filter(UNIT_CODE == "MAPR") %>% st_centroid(), col.region = "magenta", layer.name = "CSU Centroid") +
-mapview(units_clustered %>% filter(UNIT_CODE == "MAPR"), zcol = "cluster_id", layer.name = "MAPR")
+  mapview(units_clustered %>% filter(UNIT_CODE == "MAPR") %>% st_centroid(), col.region = "magenta", layer.name = "CSU Centroid") +
+  mapview(units_clustered %>% filter(UNIT_CODE == "MAPR"), zcol = "cluster_id", layer.name = "MAPR")
 
 mapview(ccrp_centroids %>% filter(UNIT_CODE == "ACAD"), layer.name = "CCRP", col.region = "brown") + 
   mapview(units_clustered %>% filter(UNIT_CODE == "ACAD") %>% st_point_on_surface(), layer.name = "CSU Pseudo-Centroid") +
-   mapview(units_clustered %>% filter(UNIT_CODE == "ACAD") %>% st_centroid(), col.region = "magenta", layer.name = "CSU Centroid") +
-mapview(units_clustered %>% filter(UNIT_CODE == "ACAD"), zcol = "cluster_id", layer.name = "ACAD")
+  mapview(units_clustered %>% filter(UNIT_CODE == "ACAD") %>% st_centroid(), col.region = "magenta", layer.name = "CSU Centroid") +
+  mapview(units_clustered %>% filter(UNIT_CODE == "ACAD"), zcol = "cluster_id", layer.name = "ACAD")
 
 mapview(ccrp_centroids %>% filter(UNIT_CODE == "THRO"), layer.name = "CCRP", col.region = "brown") + 
   mapview(units_clustered %>% filter(UNIT_CODE == "THRO") %>% st_point_on_surface(), layer.name = "CSU Pseudo-Centroid") +
-   mapview(units_clustered %>% filter(UNIT_CODE == "THRO") %>% st_centroid(), col.region = "magenta", layer.name = "CSU Centroid") +
-mapview(units_clustered %>% filter(UNIT_CODE == "THRO"), zcol = "cluster_id", layer.name = "THRO")
+  mapview(units_clustered %>% filter(UNIT_CODE == "THRO") %>% st_centroid(), col.region = "magenta", layer.name = "CSU Centroid") +
+  mapview(units_clustered %>% filter(UNIT_CODE == "THRO"), zcol = "cluster_id", layer.name = "THRO")
 ```
 
 Their CCRP park centroid layer is also missing some parks:
@@ -168,6 +187,6 @@ missing_parks <- parks %>%
   filter(!UNIT_CODE %in% ccrp_centroids$UNIT_CODE) 
 
 DT::datatable(missing_parks %>%
-  distinct(UNIT_NAME, .keep_all = TRUE) %>%
-  select(UNIT_NAME, UNIT_CODE))
+                distinct(UNIT_NAME, .keep_all = TRUE) %>%
+                select(UNIT_NAME, UNIT_CODE))
 ```
