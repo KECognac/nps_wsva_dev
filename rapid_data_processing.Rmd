@@ -241,15 +241,21 @@ inundation_data <- process_inundation_data(coast_dir_path = here("data", "all", 
 # took under 5 minutes
 ```
 
-# CUSP Data
-
-Combine all NOAA CUSP shoreline tiles into a single GeoPackage for use by `calc_inundation_sensitivity()`.
+# Process Saltwater Intrusion Data
 
 ```{r}
-process_CUSP_data(
-  cusp_dir_path = here("data", "all", "coast_comp_data", "NOAA_CUSP"),
-  output_dir    = here("data", "rapid", "inputs", "coast_comp")
+process_swi_data(
+  data_path  = here("data", "all", "coast_comp_data", "adams_swi_2024", "data", "output_data.txt"),
+  output_dir = here("data", "rapid", "inputs", "swi")
 )
-# took 2 minutes
 ```
 
+# Process Coastal Weights
+
+```{r}
+process_coastal_weights(
+  water_supplies = water_supplies,
+  cusp_dir_path  = here("data", "all", "coast_comp_data", "NOAA_CUSP"),
+  output_dir     = here("data", "rapid", "inputs", "coast_comp")
+)
+```

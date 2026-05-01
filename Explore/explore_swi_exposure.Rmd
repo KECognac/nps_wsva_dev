@@ -1,0 +1,136 @@
+---
+title: "Saltwater Intrusion Exposure Indicator — Exploration"
+author: "NPS Water Vulnerability"
+date: "`r Sys.Date()`"
+output: html_document
+editor_options:
+  markdown:
+    wrap: 80
+---
+
+# SETUP
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+```{r load-libraries}
+source("setup.R")
+mapviewOptions(fgb = FALSE)
+```
+
+# LOAD DATA
+
+```{r load-water-supplies}
+water_supplies <- get_wsd(rapid = TRUE) 
+```
+
+```{r load-swi-centroids}
+swi_pts <- st_read(here("data", "rapid", "inputs", "swi", "swi_points.gpkg"), quiet = TRUE)
+```
+
+```{r load-swi-results}
+swi_csv <- list.files(
+  here("data", "rapid", "outputs"),
+  pattern    = "swi_exposure.*\\.csv",
+  full.names = TRUE
+) %>% sort() %>% tail(1)
+
+swi_results <- read_csv(swi_csv)
+```
+
+# MAP
+
+Water supply points assigned an SWI exposure value are colored by rank, sized
+by coastal weight, and outlined in black. Each is connected by a black line to
+the SWI estimation point used to assign its value. SWI points used in the
+assignment are colored by their raw Case_C value (no border). Water supplies
+more than 50 km from any SWI point are grey with a black border. SWI points
+not matched to any water supply are grey.
+
+```{r build-map}
+# Join results onto water supply geometries
+ws_mapped <- water_supplies %>%
+  inner_join(
+    swi_results %>% select(-park_unit, -park_name),
+    by = "wsd_source_id"
+  )
+
+# Coastal water supplies only (those with an assigned SWI value)
+ws_coastal <- ws_mapped %>%
+  filter(!is.na(raw_swi_migration)) %>%
+  st_transform(5070)
+
+swi_proj <- st_transform(swi_pts, 5070)
+
+# Find nearest SWI point for each coastal water supply
+nearest_idx <- st_nearest_feature(ws_coastal, swi_proj)
+used_idx    <- unique(nearest_idx)
+swi_used    <- swi_proj[used_idx, ]  %>% st_transform(4326)
+swi_unused  <- swi_proj[-used_idx, ] %>% st_transform(4326)
+
+# Build lines connecting each water supply to its matched SWI point
+connector_lines <- st_nearest_points(
+  ws_coastal,
+  swi_proj[nearest_idx, ],
+  pairwise = TRUE
+) %>%
+  st_as_sf() %>%
+  st_transform(4326)
+
+pal <- colorRampPalette(c("green", "yellow", "red"))
+
+# Scale point size by coastal_weight
+point_size <- ifelse(
+  is.na(ws_mapped$coastal_weight),
+  2,
+  scales::rescale(ws_mapped$coastal_weight, to = c(3, 8))
+)
+
+mapview(swi_unused,
+        col.regions = "grey",
+        color       = "grey",
+        cex         = 4,
+        layer.name  = "SWI Points (unused)") +
+  mapview(connector_lines,
+        color      = "black",
+        lwd        = 1,
+        layer.name = "WS → SWI connection") +
+  mapview(swi_used,
+          zcol        = "Case_C",
+          col.regions = pal,
+          color       = NA,
+          cex         = 5,
+          pch         = 18,
+          layer.name  = "SWI Points (Case_C)",
+          popup       = leafpop::popupTable(
+            sf::st_drop_geometry(swi_used) %>%
+              select(watershed_id, Case_C)
+          )) +
+  mapview(ws_mapped,
+          zcol        = "rank_swi_migration",
+          col.regions = pal,
+          na.color    = "grey",
+          color       = "black",
+          lwd         = 2,
+          cex         = point_size,
+          layer.name  = "SWI Exposure (rank)",
+          popup       = leafpop::popupTable(
+            sf::st_drop_geometry(ws_mapped) %>%
+              select(wsd_source_id, park_name, raw_swi_migration,
+                     norm_swi_migration, rank_swi_migration, coastal_weight)
+          ))
+```
+
+Browsing this map you will probably immediately find some strange examples. 
+Using a 50km buffer around a SWI point to limit the search area for assignment
+of the exposure value does not consider the possibility that the closest
+value may be on an island just off the coast. Forcing water supplies to 
+only use SWI points that are in the same polygon as them still does not
+resolve the the issue of SWI assignment crossing channels, and runs into the 
+issue of no assignment when the closest SWI point is just off the coast, like 
+many of the points on the Cape Cod National Seashore.
+
+You will also notice that there are water supplies that have a coastal weight
+but no SWI assignment. That means that during the coastal weighting calculation
+they were within 50km of a coastline, but not within 50km of a SWI point. 
