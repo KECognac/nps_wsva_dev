@@ -111,7 +111,7 @@ pyromes_selected <- read_csv("data/rapid/inputs/pyromes_selected.csv")
 
 # Calculate indicator
 fire_exp <- calc_fire_exposure(
-  water_supplies = st_filter(water_supplies, pyromes),
+  water_supplies = water_supplies,
   fire_prob_data = pyromes_selected,
   pyrome_data = pyromes,
   save = TRUE,
@@ -343,7 +343,6 @@ visitation_sen <- calc_visitation_sensitivity(water_supplies,
          rank_avg_visitation, rank_scaled_trend_visitation,
          norm_avg_visitation, norm_scaled_trend_visitation)
 ```
-
 
 ------------------------------------------------------------------------
 
