@@ -208,6 +208,19 @@ slr_inundation_exp <- calc_inundation_exposure(
 # 5 minutes for all water sources
 ```
 
+## Saltwater Intrusion
+
+```{r}
+swi_exp <- calc_swi_exposure(
+  water_supplies  = water_supplies,
+  swi_pts         = here("data", "rapid", "inputs", "swi", "swi_points.gpkg"),
+  coastal_weights = here("data", "rapid", "inputs", "coast_comp", "coastal_weights.csv"),
+  save            = TRUE,
+  output_dir      = here("data", "rapid", "outputs"),
+  verbose         = TRUE
+)
+```
+
 # Sensitivity
 
 ## Fire
