@@ -46,8 +46,8 @@ exposure_path <- list.files(
   output_dir,
   pattern = "^drought_exposure_.*\\.csv$",
   full.names = TRUE
-) |>
-  sort(decreasing = TRUE) |>
+) %>%
+  sort(decreasing = TRUE) %>%
   dplyr::first()
 
 monthly_drought_path <- file.path(
@@ -302,7 +302,7 @@ quartile_parks %>%
   knitr::kable(caption = "Example parks — one per quartile of median Δ SPEI")
 ```
 
-```{r load-monthly-data, cache=TRUE}
+```{r load-monthly-data, cache = TRUE, results = "hide"}
 required_monthly_cols <- c(
   "wsd_source_id", "park_unit", "ym", "year", "month", "analysis_year",
   "drought_period", "model", "ssp", "run",
@@ -327,18 +327,6 @@ climate_monthly <- monthly_ds %>%
 climate_monthly[, ym := as.IDate(ym)]
 climate_monthly[, monthly_balance := climatic_water_balance]
 climate_monthly[!is.finite(monthly_balance), monthly_balance := NA_real_]
-
-cat("Monthly drought file:", monthly_drought_path, "\n")
-cat("Models available:", n_distinct(climate_monthly$model), "\n")
-cat("Scenarios available:", paste(sort(unique(climate_monthly$ssp)), collapse = ", "), "\n")
-cat("Date range:", as.character(min(climate_monthly$ym)), "to", as.character(max(climate_monthly$ym)), "\n")
-cat("Rows:", nrow(climate_monthly), "\n")
-
-climate_monthly[
-  ,
-  .N,
-  by = .(drought_period, source_type)
-][order(drought_period, source_type)]
 ```
 
 ```{r compute-spei-timeseries, cache=TRUE}
@@ -817,11 +805,13 @@ p_worst / p_best
 
 ## Figure 8 — Map of raw % change in SPEI
 
-```{r fig-maps}
+```{r, results = "hide"}
 
 water_supplies <- get_wsd(rapid = TRUE) %>%
  inner_join(exposure, by = c("wsd_source_id", "park_unit"))
+```
 
+```{r}
 make_continuous_pal <- function(vals) {
   vals <- vals[is.finite(vals)]   # drop NA / NaN / Inf before range calc
 
