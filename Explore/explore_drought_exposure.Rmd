@@ -1,0 +1,963 @@
+---
+title: "Drought Exposure Indicator — Exploratory Analysis"
+subtitle: "Projected Change in SPEI-12 Drought Conditions for NPS Water Supplies"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    theme: flatly
+    highlight: tango
+    toc: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+    toc_depth: 3
+    number_sections: true
+    fig_width: 10
+    fig_height: 6
+    code_folding: show
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  dpi = 150
+)
+```
+
+```{r packages}
+source("setup.R")
+
+# ── analysis settings ────────────────────────────────────────────────────────
+hist_start <- 1980L
+hist_end   <- 2010L
+fut_start  <- 2035L
+fut_end    <- 2065L
+spei_scale <- 12L
+spei_inf_cap <- 4
+water_year <- TRUE
+hindcast <- TRUE
+
+output_dir <- "data/rapid/outputs"
+input_dir  <- "data/rapid/inputs"
+
+exposure_path <- list.files(
+  output_dir,
+  pattern = "^drought_exposure_.*\\.csv$",
+  full.names = TRUE
+) |>
+  sort(decreasing = TRUE) |>
+  dplyr::first()
+
+monthly_drought_path <- file.path(
+  input_dir,
+  glue::glue("loca2_drought_monthly_{hist_start}-{hist_end}_{fut_start}-{fut_end}_hindcast-{hindcast}.parquet")
+)
+
+stopifnot(file.exists(exposure_path))
+stopifnot(file.exists(monthly_drought_path))
+
+# ── shared theme ──────────────────────────────────────────────────────────────
+theme_rapid <- function(base_size = 12) {
+  theme_minimal(base_size = base_size) +
+    theme(
+      plot.title       = element_text(face = "bold", size = base_size + 1),
+      plot.subtitle    = element_text(color = "grey40", size = base_size - 1),
+      strip.text       = element_text(face = "bold"),
+      panel.grid.minor = element_blank(),
+      legend.position  = "bottom"
+    )
+}
+
+# ── colour palette ────────────────────────────────────────────────────────────
+col_dry       <- "#DC2626"   # red — drought / drying
+col_wet       <- "#2563EB"   # blue — wetting
+col_neutral   <- "#6B7280"   # grey — no change reference
+col_hist      <- "#1D4ED8"   # dark blue — historical period
+col_future    <- "#B91C1C"   # dark red — future period
+col_moderate  <- "#F97316"   # orange — moderate drought band
+col_severe    <- "#DC2626"   # red — severe drought band
+col_extreme   <- "#7F1D1D"   # dark red — extreme drought band
+col_highlight <- "#1E3A5F"   # navy — accent
+
+# ── SPEI classification thresholds ───────────────────────────────────────────
+spei_breaks  <- c(-Inf, -2, -1.5, -1, 1, 1.5, 2, Inf)
+spei_labels  <- c("Extreme drought", "Severe drought", "Moderate drought",
+                  "Near normal",
+                  "Moderately wet", "Very wet", "Extremely wet")
+spei_colours <- c("#7F1D1D", "#DC2626", "#F97316",
+                  "#D1D5DB",
+                  "#93C5FD", "#3B82F6", "#1E3A5F")
+```
+
+---
+
+# Overview
+
+## What is the Drought Exposure Indicator?
+
+The **Drought Exposure** indicator measures how much projected climate change is expected to
+shift long-term drought conditions at each NPS water supply. Drought is characterized using the
+**Standardized Precipitation-Evapotranspiration Index (SPEI)**, a widely used metric that
+accounts for both precipitation and atmospheric evaporative demand (potential evapotranspiration, PET).
+
+The indicator reports the **change in mean 12-month SPEI** between the historical baseline period
+and the future projection window across a full ensemble of LOCA2 climate models and SSPs.
+
+$$\Delta\text{SPEI} = \overline{\text{SPEI}}^{(\text{future})} - \overline{\text{SPEI}}^{(\text{historical})}$$
+
+**Negative Δ SPEI → drying (worsening drought exposure)**  
+**Positive Δ SPEI → wetting (improving conditions)**
+
+Therefore, a *more negative* value is *worse*, so `add_standardized_indicators()` is called with `invert = TRUE`.
+
+## Why 12-Month SPEI?
+
+SPEI can be calculated at different accumulation scales (1, 3, 6, 12 months). A 12-month
+accumulation (`spei_scale = 12`) captures long-term hydrological drought. It is less 
+sensitive to individual wet or dry months and more indicative of sustained multi-season stress.
+
+## Infinite SPEI Values
+
+SPEI is derived by fitting a log-logistic distribution to the calibration-period
+water balance, then transforming probabilities through the standard normal quantile
+function. When a future month's accumulated balance falls **below the calibration
+minimum**, the fitted distribution assigns it a probability of zero — and the normal
+quantile of zero is **−Inf**. This is not a data error; it signals that projected
+conditions would be historically unprecedented. The symmetric +Inf case exists but
+is rare here.
+
+Before computing mean SPEI, I capped the raw Inf values with ±`r spei_inf_cap`.
+This keeps them influential without making averages numerically meaningless. The
+original counts are retained in the `raw_spei_*_inf_months` diagnostic columns;
+`raw_spei_future_report_pct_neg_inf_months` is the most useful — it records how
+often future reporting months hit −Inf before capping them, which indicates the 
+reported change in SPEI is a "conservative" lower bound on drying severity.
+**Why SPEI-12 reduces infinite values:** Summing twelve months of water balance
+produces a wider, more continuously distributed series than any single month or
+season. Arid-climate months with identical near-zero balances — which concentrate
+probability mass at the distribution boundary and make −Inf easy to trigger — are
+averaged away. I first attempted to do SPEI-6, but it produced MANY Inf values.
+SPEI-12 retains fewer infinite values than SPEI-3 or SPEI-6 across this water supply 
+network while still capturing the multi-season drought signal relevant to
+reservoir storage and groundwater recharge.
+
+## SPEI Classification
+
+```{r spei-ref-table, echo=FALSE}
+tibble(
+  `SPEI value` = c("< −2.0", "−2.0 to −1.5", "−1.5 to −1.0",
+                   "−1.0 to +1.0",
+                   "+1.0 to +1.5", "+1.5 to +2.0", "> +2.0"),
+  Category = spei_labels,
+  Interpretation = c("Exceptional water deficit; severe operational risk",
+                     "Serious multi-season water deficit",
+                     "Noticeable deficit; may stress smaller supplies",
+                     "Conditions within historical normal range",
+                     "Above-average moisture; favorable conditions",
+                     "Significant surplus",
+                     "Record wetness")) %>%
+  knitr::kable(caption = "SPEI drought classification thresholds")
+```
+
+```{r load-results}
+exposure <- read_csv(exposure_path, show_col_types = FALSE)
+
+exposure %>%
+  summarize(
+    n_water_supplies = n(),
+    n_parks = n_distinct(park_unit),
+    pct_drying_p50 = mean(raw_spei_change_p50 < 0,  na.rm = TRUE) * 100,
+    pct_wetting_p50 = mean(raw_spei_change_p50 > 0,  na.rm = TRUE) * 100,
+    mean_delta_spei_p50 = mean(raw_spei_change_p50, na.rm = TRUE),
+    median_delta_spei_p50 = median(raw_spei_change_p50, na.rm = TRUE),
+    mean_pct_models_drying = mean(raw_spei_models_showing_decrease, na.rm = TRUE),
+    mean_p10_p90_spread = mean(raw_spei_change_p90 - raw_spei_change_p10, na.rm = TRUE),
+    median_model_count = median(raw_spei_model_count, na.rm = TRUE),
+    mean_future_report_pct_neg_inf = if ("raw_spei_future_report_pct_neg_inf_months" %in% names(exposure)) {
+      mean(raw_spei_future_report_pct_neg_inf_months, na.rm = TRUE)
+    } else {
+      NA_real_
+    }
+  ) %>%
+  pivot_longer(everything(), names_to = "Metric", values_to = "Value") %>%
+  mutate(Value = round(Value, 3)) %>%
+  knitr::kable(caption = glue::glue("Summary statistics for the Drought Exposure indicator ({basename(exposure_path)})"))
+```
+
+---
+
+# SPEI Fit Diagnostics
+
+The updated exposure function caps infinite SPEI values before computing mean SPEI change:
+
+- `-Inf` becomes `-spei_inf_cap`.
+- `Inf` becomes `spei_inf_cap`.
+- `NaN` remains `NA`.
+
+The final exposure output also retains diagnostic fields for total and reporting-window infinite values.
+The most drought-relevant diagnostic is `raw_spei_future_report_pct_neg_inf_months`, which records
+how often future reporting months hit `-Inf` before capping.
+
+```{r inf-diagnostic-summary}
+inf_required <- c(
+  "raw_spei_future_report_pct_neg_inf_months",
+  "raw_spei_models_with_future_report_neg_inf"
+)
+
+if (all(inf_required %in% names(exposure))) {
+
+  exposure %>%
+    summarise(
+      `Mean % extreme dry months` =
+        mean(raw_spei_future_report_pct_neg_inf_months, na.rm = TRUE),
+      `Median % extreme dry months` =
+        median(raw_spei_future_report_pct_neg_inf_months, na.rm = TRUE),
+      `90th percentile % extreme dry months` =
+        quantile(raw_spei_future_report_pct_neg_inf_months, 0.90, na.rm = TRUE),
+      `Max % extreme dry months` =
+        max(raw_spei_future_report_pct_neg_inf_months, na.rm = TRUE),
+
+      `Mean % affected models` =
+        mean(raw_spei_models_with_future_report_neg_inf, na.rm = TRUE),
+      `Median % affected models` =
+        median(raw_spei_models_with_future_report_neg_inf, na.rm = TRUE),
+      `90th percentile % affected models` =
+        quantile(raw_spei_models_with_future_report_neg_inf, 0.90, na.rm = TRUE),
+      `Max % affected models` =
+        max(raw_spei_models_with_future_report_neg_inf, na.rm = TRUE)
+    ) %>%
+    pivot_longer(
+      everything(),
+      names_to = "Diagnostic",
+      values_to = "Percent"
+    ) %>%
+    mutate(Percent = round(Percent, 3)) %>%
+    knitr::kable(
+      caption = "Extreme dry SPEI diagnostics across water supplies"
+    )
+
+} else {
+  tibble(
+    Note = "Extreme dry SPEI diagnostic columns were not found."
+  ) %>%
+    knitr::kable()
+}
+```
+
+```{r fig-inf-diagnostics, fig.height=5}
+if ("raw_spei_future_report_pct_neg_inf_months" %in% names(exposure)) {
+  exposure %>%
+    filter(!is.na(raw_spei_future_report_pct_neg_inf_months)) %>%
+    ggplot(aes(x = raw_spei_future_report_pct_neg_inf_months)) +
+    geom_histogram(binwidth = 1, fill = col_dry, color = "white", alpha = 0.85) +
+    labs(
+      title = "Future Reporting Months with Unbounded Dry SPEI Before Capping",
+      subtitle = "Higher values indicate months where SPEI hit -Inf before being capped for the mean-change calculation.",
+      x = "% of future reporting months with raw SPEI = -Inf",
+      y = "Count of water supplies"
+    ) +
+    theme_rapid()
+}
+```
+
+---
+
+# SPEI Time Series — Example Parks
+
+Reconstructing the SPEI time series for selected parks lets us visualise both the historical
+calibration period and the projected future trajectory across the full model ensemble.
+
+```{r select-example-parks}
+set.seed(42)
+
+quartile_parks <- exposure %>%
+  group_by(park_unit) %>%
+  slice_min(wsd_source_id, n = 1, with_ties = FALSE) %>%
+  ungroup() %>%
+  mutate(quartile = ntile(raw_spei_change_p50, 4)) %>%
+  group_by(quartile) %>%
+  slice_sample(n = 1) %>%
+  ungroup() %>%
+  arrange(raw_spei_change_p50)
+
+example_parks <- quartile_parks$park_unit
+example_wsd <- quartile_parks$wsd_source_id
+
+quartile_parks %>%
+  select(
+    park_unit,
+    wsd_source_id,
+    quartile,
+    raw_spei_change_p10,
+    raw_spei_change_p50,
+    raw_spei_change_p90,
+    raw_spei_models_showing_decrease,
+    raw_spei_model_count,
+    any_of(c("raw_spei_future_report_pct_neg_inf_months",
+             "raw_spei_models_with_future_report_neg_inf"))
+  ) %>%
+  mutate(across(where(is.numeric), ~round(.x, 3))) %>%
+  knitr::kable(caption = "Example parks — one per quartile of median Δ SPEI")
+```
+
+```{r load-monthly-data, cache=TRUE}
+required_monthly_cols <- c(
+  "wsd_source_id", "park_unit", "ym", "year", "month", "analysis_year",
+  "drought_period", "model", "ssp", "run",
+  "monthly_precipitation", "monthly_pet", "climatic_water_balance",
+  "source_type", "source_priority", "input_window", "reporting_period"
+)
+
+monthly_ds <- arrow::open_dataset(monthly_drought_path)
+monthly_cols <- names(monthly_ds)
+missing_monthly_cols <- setdiff(required_monthly_cols, monthly_cols)
+
+if (length(missing_monthly_cols) > 0L) {
+  stop("Monthly drought file is missing required columns: ", paste(missing_monthly_cols, collapse = ", "))
+}
+
+climate_monthly <- monthly_ds %>%
+  select(all_of(required_monthly_cols)) %>%
+  filter(wsd_source_id %in% example_wsd) %>%
+  collect() %>%
+  as.data.table()
+
+climate_monthly[, ym := as.IDate(ym)]
+climate_monthly[, monthly_balance := climatic_water_balance]
+climate_monthly[!is.finite(monthly_balance), monthly_balance := NA_real_]
+
+cat("Monthly drought file:", monthly_drought_path, "\n")
+cat("Models available:", n_distinct(climate_monthly$model), "\n")
+cat("Scenarios available:", paste(sort(unique(climate_monthly$ssp)), collapse = ", "), "\n")
+cat("Date range:", as.character(min(climate_monthly$ym)), "to", as.character(max(climate_monthly$ym)), "\n")
+cat("Rows:", nrow(climate_monthly), "\n")
+
+climate_monthly[
+  ,
+  .N,
+  by = .(drought_period, source_type)
+][order(drought_period, source_type)]
+```
+
+```{r compute-spei-timeseries, cache=TRUE}
+# Compute SPEI-12 per model × SSP × water supply using the already assembled
+# drought_period rows produced by process_drought_data().
+
+if (water_year) {
+  hist_report_start_month <- as.IDate(paste0(hist_start - 1L, "-10-01"))
+  hist_report_end_month   <- as.IDate(paste0(hist_end, "-09-01"))
+  fut_report_start_month  <- as.IDate(paste0(fut_start - 1L, "-10-01"))
+  fut_report_end_month    <- as.IDate(paste0(fut_end, "-09-01"))
+} else {
+  hist_report_start_month <- as.IDate(paste0(hist_start, "-01-01"))
+  hist_report_end_month   <- as.IDate(paste0(hist_end, "-12-01"))
+  fut_report_start_month  <- as.IDate(paste0(fut_start, "-01-01"))
+  fut_report_end_month    <- as.IDate(paste0(fut_end, "-12-01"))
+}
+
+pad_months <- spei_scale - 1L
+hist_input_start_month <- seq(hist_report_start_month, by = "-1 month", length.out = pad_months + 1L)[pad_months + 1L]
+hist_input_end_month <- hist_report_end_month
+fut_input_start_month <- seq(fut_report_start_month, by = "-1 month", length.out = pad_months + 1L)[pad_months + 1L]
+fut_input_end_month <- fut_report_end_month
+
+future_ssps <- climate_monthly[
+  drought_period == "future",
+  unique(.SD),
+  .SDcols = c("model", "ssp", "run")
+]
+
+cap_spei <- function(x, cap = spei_inf_cap) {
+  x[x == Inf] <- cap
+  x[x == -Inf] <- -cap
+  x[is.nan(x)] <- NA_real_
+  x
+}
+
+run_spei_values <- function(series_dt, date_col, ref_idx) {
+  if (!nrow(series_dt) || !any(ref_idx & !is.na(series_dt$monthly_balance))) {
+    return(rep(NA_real_, nrow(series_dt)))
+  }
+
+  date_vals <- series_dt[[date_col]]
+  ref_dates <- date_vals[ref_idx & !is.na(series_dt$monthly_balance)]
+
+  balance_ts <- ts(
+    series_dt$monthly_balance,
+    start = c(year(min(date_vals)), month(min(date_vals))),
+    frequency = 12
+  )
+
+  out <- tryCatch(
+    as.numeric(
+      SPEI::spei(
+        balance_ts,
+        scale = spei_scale,
+        ref.start = c(year(min(ref_dates)), month(min(ref_dates))),
+        ref.end = c(year(max(ref_dates)), month(max(ref_dates))),
+        na.rm = TRUE,
+        verbose = FALSE
+      )$fitted
+    ),
+    error = function(e) rep(NA_real_, nrow(series_dt))
+  )
+
+  cap_spei(out)
+}
+
+run_spei_for_park <- function(wsd_id, park, model_id, ssp_id, run_id) {
+
+  hist_data <- climate_monthly[
+    wsd_source_id == wsd_id &
+      park_unit == park &
+      model == model_id &
+      ssp == ssp_id &
+      run == run_id &
+      drought_period == "historical" &
+      ym >= hist_input_start_month &
+      ym <= hist_input_end_month
+  ]
+
+  fut_data <- climate_monthly[
+    wsd_source_id == wsd_id &
+      park_unit == park &
+      model == model_id &
+      ssp == ssp_id &
+      run == run_id &
+      drought_period == "future" &
+      ym >= fut_input_start_month &
+      ym <= fut_input_end_month
+  ]
+
+  setorder(hist_data, ym)
+  setorder(fut_data, ym)
+
+  if (nrow(hist_data) < spei_scale || nrow(fut_data) < spei_scale) {
+    return(NULL)
+  }
+
+  hist_full <- data.table(ym = seq(hist_input_start_month, hist_input_end_month, by = "month"))
+  hist_full <- merge(
+    hist_full,
+    hist_data[, .(ym, monthly_balance)],
+    by = "ym",
+    all.x = TRUE,
+    sort = TRUE
+  )
+
+  hist_idx <- hist_full$ym >= hist_report_start_month & hist_full$ym <= hist_report_end_month
+  hist_spei <- run_spei_values(hist_full, "ym", hist_idx)
+
+  fut_full <- data.table(ym = seq(fut_input_start_month, fut_input_end_month, by = "month"))
+  fut_full <- merge(
+    fut_full,
+    fut_data[, .(ym, monthly_balance)],
+    by = "ym",
+    all.x = TRUE,
+    sort = TRUE
+  )
+
+  future_fit <- rbindlist(
+    list(
+      hist_full[, .(original_ym = ym, period = "historical", monthly_balance = monthly_balance)],
+      fut_full[, .(original_ym = ym, period = "future", monthly_balance = monthly_balance)]
+    ),
+    use.names = TRUE
+  )
+
+  future_fit[, spei_ym := seq(from = hist_input_start_month, by = "month", length.out = .N)]
+
+  future_ref_idx <- future_fit$period == "historical" &
+    future_fit$original_ym >= hist_report_start_month &
+    future_fit$original_ym <= hist_report_end_month
+
+  future_idx <- future_fit$period == "future" &
+    future_fit$original_ym >= fut_report_start_month &
+    future_fit$original_ym <= fut_report_end_month
+
+  future_spei <- run_spei_values(future_fit, "spei_ym", future_ref_idx)
+
+  hist_out <- hist_full[hist_idx, .(
+    wsd_source_id = wsd_id,
+    park_unit = park,
+    ym,
+    year = year(ym),
+    month = month(ym),
+    analysis_year = if (water_year) year(ym) + fifelse(month(ym) >= 10, 1L, 0L) else year(ym),
+    model = model_id,
+    ssp = ssp_id,
+    run = run_id,
+    period = "historical",
+    spei = hist_spei[hist_idx]
+  )]
+
+  fut_out <- future_fit[future_idx, .(
+    wsd_source_id = wsd_id,
+    park_unit = park,
+    ym = original_ym,
+    year = year(original_ym),
+    month = month(original_ym),
+    analysis_year = if (water_year) year(original_ym) + fifelse(month(original_ym) >= 10, 1L, 0L) else year(original_ym),
+    model = model_id,
+    ssp = ssp_id,
+    run = run_id,
+    period = "future",
+    spei = future_spei[future_idx]
+  )]
+
+  rbindlist(list(hist_out, fut_out), use.names = TRUE, fill = TRUE)[!is.na(spei)]
+}
+
+spei_ts_list <- vector("list", nrow(future_ssps) * length(example_wsd))
+idx <- 1L
+
+invisible(
+  capture.output(
+    suppressWarnings(
+      suppressMessages({
+        for (wsd in example_wsd) {
+          pk <- quartile_parks$park_unit[quartile_parks$wsd_source_id == wsd]
+
+          for (i in seq_len(nrow(future_ssps))) {
+            s <- future_ssps[i, ]
+
+            spei_ts_list[[idx]] <- run_spei_for_park(
+              wsd,
+              pk,
+              s$model,
+              s$ssp,
+              s$run
+            )
+
+            idx <- idx + 1L
+          }
+        }
+      })
+    ),
+    file = nullfile()
+  )
+)
+
+spei_ts <- rbindlist(spei_ts_list, use.names = TRUE, fill = TRUE)
+
+# Ensemble summary per park × month
+spei_summary <- spei_ts %>%
+  as_tibble() %>%
+  left_join(quartile_parks %>% select(park_unit, raw_spei_change_p50), by = "park_unit") %>%
+  mutate(
+    park_label = glue("{park_unit}  (median Δ SPEI = {round(raw_spei_change_p50, 3)})"),
+    year_dec = as.numeric(format(ym, "%Y")) +
+      (as.numeric(format(ym, "%m")) - 1) / 12
+  ) %>%
+  group_by(park_unit, park_label, raw_spei_change_p50, ym, year_dec, period) %>%
+  summarise(
+    spei_mean = mean(spei, na.rm = TRUE),
+    spei_p10  = quantile(spei, 0.10, na.rm = TRUE),
+    spei_p90  = quantile(spei, 0.90, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(park_label = fct_reorder(park_label, -raw_spei_change_p50, .fun = function(x) x[1]))
+```
+
+## Figure 1 — SPEI-12 time series (historical + future)
+
+Ensemble-mean SPEI-12 with 10th–90th percentile ribbon across all GCM × SSP runs. The
+vertical dashed line marks the boundary between the calibration period and the future
+projection window.
+
+```{r fig-spei-timeseries, fig.height=9}
+drought_bands <- tibble(
+  ymin  = c(-Inf, -2.0, -1.5, -1.0),
+  ymax  = c(-2.0, -1.5, -1.0, 0.0),
+  label = c("Extreme", "Severe", "Moderate", "Mild"),
+  fill  = c(col_extreme, col_severe, col_moderate, "#FEF3C7")
+)
+
+spei_summary %>%
+  ggplot(aes(x = year_dec)) +
+  geom_rect(
+    data = drought_bands,
+    aes(xmin = -Inf, xmax = Inf, ymin = ymin, ymax = ymax, fill = label),
+    inherit.aes = FALSE,
+    alpha = 0.08
+  ) +
+  scale_fill_manual(
+    values = setNames(drought_bands$fill, drought_bands$label),
+    name = "Drought class",
+    guide = guide_legend(order = 2)
+  ) +
+  geom_vline(xintercept = fut_start - 0.5, linetype = "dashed", color = col_neutral, linewidth = 0.7) +
+  geom_hline(yintercept = 0, color = col_neutral, linewidth = 0.4) +
+  geom_ribbon(aes(ymin = spei_p10, ymax = spei_p90, group = period), fill = col_highlight, alpha = 0.15) +
+  geom_point(aes(y = spei_mean, color = period, group = period), linewidth = 0.8) +
+  scale_color_manual(
+    values = c("historical" = col_hist, "future" = col_future),
+    labels = c("historical" = glue("Historical ({hist_start}–{hist_end})"),
+               "future" = glue("Future ({fut_start}–{fut_end})")),
+    name = NULL,
+    guide = guide_legend(order = 1)
+  ) +
+  facet_wrap(~park_label, ncol = 2, scales = "free_x") +
+  scale_x_continuous(breaks = seq(1975, 2075, 10), labels = seq(1975, 2075, 10)) +
+  coord_cartesian(ylim = c(-spei_inf_cap, 2.5)) +
+  labs(
+    title = "SPEI-12 Time Series — Historical and Projected",
+    subtitle = "Ribbon = 10th–90th percentile across GCM ensemble. Infinite SPEI values are capped for plotting and means.",
+    x = NULL,
+    y = "SPEI-12"
+  ) +
+  theme_rapid() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.key.width = unit(1.5, "cm"))
+```
+
+
+
+## Figure 2 — Δ SPEI by SSP scenario
+
+Do higher-emission scenarios project meaningfully more drying?
+
+```{r fig-by-ssp, fig.height=7}
+delta_spei_ensemble <- spei_ts %>%
+  as_tibble() %>%
+  group_by(wsd_source_id, park_unit, model, ssp, run, period) %>%
+  summarise(mean_spei = mean(spei, na.rm = TRUE), .groups = "drop") %>%
+  pivot_wider(names_from = period, values_from = mean_spei) %>%
+  filter(!is.na(historical), !is.na(future)) %>%
+  mutate(delta_spei = future - historical) %>%
+  left_join(
+    quartile_parks %>% select(park_unit, raw_spei_change_p50),
+    by = "park_unit"
+  ) %>%
+  mutate(
+    park_label = glue("{park_unit}  (median Δ SPEI = {round(raw_spei_change_p50, 3)})"),
+    park_label = fct_reorder(park_label, -raw_spei_change_p50, .fun = function(x) x[1])
+  )
+
+delta_spei_ensemble %>%
+  ggplot(aes(x = ssp, y = delta_spei, fill = ssp)) +
+  geom_hline(yintercept = 0, color = col_neutral, linetype = "dashed", linewidth = 0.6) +
+  geom_boxplot(alpha = 0.75, outlier.shape = 21, outlier.size = 1.5, outlier.fill = "white", width = 0.55) +
+  stat_summary(fun = median, geom = "point", shape = 23, size = 3, fill = "white", color = col_highlight) +
+  scale_fill_brewer(palette = "Set2", name = "SSP") +
+  facet_wrap(~ park_label, ncol = 2) +
+  labs(
+    title = "Δ SPEI by Emissions Scenario",
+    subtitle = "Diamond = median across models within each SSP. Dashed line = no change.",
+    x = "Scenario (SSP)",
+    y = "Δ SPEI-12 (future − historical)"
+  ) +
+  theme_rapid()
+```
+
+---
+
+# Indicator Distribution — All Water Supplies
+
+## Figure 3 — Histogram of median Δ SPEI (P50)
+
+```{r fig-histogram, fig.height=5}
+exposure %>%
+  ggplot(aes(x = raw_spei_change_p50)) +
+  geom_histogram(aes(fill = raw_spei_change_p50 < 0), binwidth = 0.05, color = "white", alpha = 0.85) +
+  geom_vline(xintercept = 0, color = col_neutral, linewidth = 1, linetype = "dashed") +
+  geom_vline(xintercept = median(exposure$raw_spei_change_p50, na.rm = TRUE), color = col_highlight, linewidth = 1, linetype = "dotted") +
+  annotate(
+    "text",
+    x = median(exposure$raw_spei_change_p50, na.rm = TRUE) + 0.02,
+    y = Inf,
+    label = glue("Median = {round(median(exposure$raw_spei_change_p50, na.rm = TRUE), 3)}"),
+    vjust = 1.6,
+    hjust = 0,
+    color = col_highlight,
+    size = 3.5
+  ) +
+  annotate("text", x = 0.08, y = Inf, label = "← Wetting", vjust = 1.6, color = col_wet, size = 3.5, fontface = "italic") +
+  annotate("text", x = -0.08, y = Inf, label = "Drying →", vjust = 1.6, hjust = 1, color = col_dry, size = 3.5, fontface = "italic") +
+  scale_fill_manual(
+    values = c("FALSE" = col_wet, "TRUE" = col_dry),
+    labels = c("FALSE" = "Wetting (P50 > 0)", "TRUE" = "Drying (P50 < 0)"),
+    name = NULL
+  ) +
+  labs(
+    title = "Distribution of Median (P50) Δ SPEI-12",
+    subtitle = glue("n = {nrow(exposure)} water supplies. Dashed = no change; dotted = overall median."),
+    x = "Δ SPEI-12 — median across GCM ensemble",
+    y = "Count"
+  ) +
+  theme_rapid()
+```
+
+## Figure 4 — P10 / P50 / P90 uncertainty range for all water supplies
+
+```{r fig-uncertainty-range, fig.height=6}
+exposure %>%
+  arrange(raw_spei_change_p50) %>%
+  mutate(rank = row_number()) %>%
+  ggplot(aes(x = rank)) +
+  geom_hline(yintercept = 0, color = col_neutral, linetype = "dashed", linewidth = 0.6) +
+  geom_hline(yintercept = c(-1, -1.5, -2), color = col_dry, linetype = "dotted", linewidth = 0.4, alpha = 0.5) +
+  geom_linerange(aes(ymin = raw_spei_change_p10, ymax = raw_spei_change_p90), color = "grey70", linewidth = 0.35, alpha = 0.7) +
+  geom_point(aes(y = raw_spei_change_p10, color = "P10"), size = 0.7, alpha = 0.6) +
+  geom_point(aes(y = raw_spei_change_p90, color = "P90"), size = 0.7, alpha = 0.6) +
+  geom_point(aes(y = raw_spei_change_p50, color = "P50"), size = 1.0, alpha = 0.9) +
+  scale_color_manual(name = NULL, values = c("P10" = col_dry, "P50" = col_highlight, "P90" = col_wet)) +
+  scale_y_continuous(sec.axis = sec_axis(~ ., breaks = c(-2, -1.5, -1, 0), labels = c("Extreme\ndrought", "Severe\ndrought", "Moderate\ndrought", "No change"))) +
+  labs(
+    title = "P10 / P50 / P90 Δ SPEI for All Water Supplies",
+    subtitle = "Sorted by median. Vertical segment = model uncertainty range. Horizontal dotted lines = drought thresholds.",
+    x = "Water supplies (sorted by median Δ SPEI)",
+    y = "Δ SPEI-12"
+  ) +
+  theme_rapid() +
+  theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
+```
+
+## Figure 5 — Model agreement vs. drought magnitude
+
+```{r fig-agreement-vs-magnitude, fig.height=5.5}
+exposure %>%
+  group_by(park_unit) %>%
+  summarise(
+    mean_p50 = mean(raw_spei_change_p50, na.rm = TRUE),
+    mean_pct_dry = mean(raw_spei_models_showing_decrease, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  ggplot(aes(x = mean_p50, y = mean_pct_dry)) +
+  annotate("rect", xmin = -Inf, xmax = 0, ymin = 50, ymax = Inf, fill = col_dry, alpha = 0.05) +
+  annotate("text", x = -Inf, y = Inf, label = "High-confidence drying", hjust = -0.1, vjust = 1.3, color = col_dry, size = 3, fontface = "italic") +
+  geom_hline(yintercept = 50, color = col_neutral, linetype = "dashed") +
+  geom_vline(xintercept = 0, color = col_neutral, linetype = "dashed") +
+  geom_point(aes(color = mean_p50 < 0), size = 2.5, alpha = 0.7) +
+  geom_text_repel(
+    data = . %>% filter(mean_p50 < quantile(mean_p50, 0.10) | mean_pct_dry > 80 | mean_pct_dry < 20),
+    aes(label = park_unit),
+    size = 2.8,
+    max.overlaps = 20
+  ) +
+  scale_color_manual(values = c("FALSE" = col_wet, "TRUE" = col_dry), labels = c("FALSE" = "Wetting (median)", "TRUE" = "Drying (median)"), name = NULL) +
+  scale_y_continuous(limits = c(0, 100), labels = label_percent(scale = 1)) +
+  labs(
+    title = "Model Agreement vs. Magnitude of Projected Drying",
+    subtitle = "Upper-left: drying signal with high model consensus — highest drought exposure risk.",
+    x = "Mean P50 Δ SPEI across water supplies",
+    y = "% of models projecting drying (SPEI decrease)"
+  ) +
+  theme_rapid()
+```
+
+## Figure 6 — P50 Δ SPEI compared against drought thresholds
+
+If a park's current mean SPEI sits near 0 (near-normal) but Δ SPEI is −1, the future mean
+would fall near the moderate drought threshold. This plot contextualises the *change* against
+SPEI classification thresholds assuming a historical baseline mean of 0.
+
+```{r fig-threshold-context, fig.height=5}
+exposure %>%
+  group_by(park_unit) %>%
+  summarise(p50 = mean(raw_spei_change_p50, na.rm = TRUE), .groups = "drop") %>%
+  mutate(future_spei_class = cut(p50, breaks = spei_breaks, labels = spei_labels, right = TRUE)) %>%
+  count(future_spei_class) %>%
+  filter(!is.na(future_spei_class)) %>%
+  mutate(future_spei_class = fct_relevel(future_spei_class, spei_labels)) %>%
+  ggplot(aes(x = future_spei_class, y = n, fill = future_spei_class)) +
+  geom_col(width = 0.7, show.legend = FALSE) +
+  geom_text(aes(label = n), vjust = -0.4, size = 3.5, color = "grey30") +
+  scale_fill_manual(values = setNames(spei_colours, spei_labels)) +
+  scale_x_discrete(guide = guide_axis(angle = 35)) +
+  labs(
+    title = "Projected Future SPEI Class (Assuming Historical Baseline ≈ 0)",
+    subtitle = "Bars show number of parks whose median Δ SPEI would place them in each SPEI category.",
+    x = NULL,
+    y = "Number of park units"
+  ) +
+  theme_rapid()
+```
+
+## Figure 7 — Top and bottom 20 parks by median Δ SPEI
+
+```{r fig-top-bottom, fig.height=9}
+park_summary <- exposure %>%
+  group_by(park_unit) %>%
+  summarise(
+    mean_p10 = mean(raw_spei_change_p10, na.rm = TRUE),
+    mean_p50 = mean(raw_spei_change_p50, na.rm = TRUE),
+    mean_p90 = mean(raw_spei_change_p90, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+make_ranked_plot <- function(df, title_str, dot_col) {
+  df %>%
+    mutate(park_unit = fct_reorder(park_unit, mean_p50)) %>%
+    ggplot(aes(x = park_unit)) +
+    geom_hline(yintercept = 0, linetype = "dashed", color = col_neutral) +
+    geom_hline(yintercept = -1, linetype = "dotted", color = col_dry, alpha = 0.6) +
+    geom_linerange(aes(ymin = mean_p10, ymax = mean_p90), color = "grey65", linewidth = 0.8) +
+    geom_point(aes(y = mean_p10), color = col_dry, size = 2) +
+    geom_point(aes(y = mean_p90), color = col_wet, size = 2) +
+    geom_point(aes(y = mean_p50), fill = dot_col, color = "white", shape = 21, size = 3.5) +
+    coord_flip() +
+    labs(
+      title = title_str,
+      subtitle = "Segment = P10–P90 model range. Filled circle = P50. Dotted = moderate drought threshold.",
+      x = NULL,
+      y = "Mean Δ SPEI-12 across water supplies"
+    ) +
+    theme_rapid()
+}
+
+p_worst <- park_summary %>% slice_min(mean_p50, n = 20) %>%
+  make_ranked_plot("Top 20 Parks — Greatest Projected Drying", col_dry)
+p_best <- park_summary %>% slice_max(mean_p50, n = 20) %>%
+  make_ranked_plot("Top 20 Parks — Greatest Projected Wetting", col_wet)
+
+p_worst / p_best
+```
+
+## Figure 8 — Map of raw % change in SPEI
+
+```{r fig-maps}
+
+water_supplies <- get_wsd(rapid = TRUE) %>%
+ inner_join(exposure, by = c("wsd_source_id", "park_unit"))
+
+make_continuous_pal <- function(vals) {
+  vals <- vals[is.finite(vals)]   # drop NA / NaN / Inf before range calc
+
+  if (!length(vals)) stop("No finite values in column.")
+
+  mn <- min(vals)
+  mx <- max(vals)
+
+  # Guard against zero-width domain
+  if (mn == mx) mn <- mx - 1e-6
+
+  if (mn >= 0) {
+    colorNumeric(c("lightgreen", "darkgreen"), domain = c(mn, mx),
+                 na.color = "transparent")
+  } else if (mx <= 0) {
+    colorNumeric(c("darkred", "orange"), domain = c(mn, mx),
+                 na.color = "transparent")
+  } else {
+    n      <- 512
+    neg_n  <- round(n * abs(mn) / (abs(mn) + mx))
+    pos_n  <- n - neg_n
+    colors <- c(
+      colorRampPalette(c("darkred", "orange"))(neg_n),
+      colorRampPalette(c("lightgreen", "darkgreen"))(pos_n)
+    )
+    colorNumeric(colors, domain = c(mn, mx), na.color = "transparent")
+  }
+}
+
+render_map <- function(data, col, title) {
+  pal    <- make_continuous_pal(data[[col]])
+  coords <- sf::st_coordinates(sf::st_transform(data, 4326))
+
+  leaflet(data) %>%
+    addProviderTiles("CartoDB.Positron") %>%
+    addCircleMarkers(
+      lng         = coords[, 1],
+      lat         = coords[, 2],
+      radius      = 5,
+      fillColor   = ~ pal(get(col)),
+      fillOpacity = 0.85,
+      color       = "white",
+      weight      = 0.5,
+      popup       = ~ paste0(
+        "<b>", wsd_source_id, "</b><br>",
+        park_name, "<br>",
+        water_system_name, "<br>",
+        title, ": <b>", round(get(col), 3), "</b>"
+      )
+    ) %>%
+    addLegend(
+      position  = "bottomright",
+      pal       = pal,
+      values    = data[[col]],
+      title     = title,
+      labFormat = labelFormat(digits = 2)
+    )
+}
+
+maps <- list(
+  render_map(water_supplies, "raw_spei_change_p10", "Δ SPEI-12 (P10)"),
+  render_map(water_supplies, "raw_spei_change_p50", "Δ SPEI-12 (P50)"),
+  render_map(water_supplies, "raw_spei_change_p90", "Δ SPEI-12 (P90)")
+)
+
+htmltools::tagList(maps)
+```
+
+
+---
+
+# Climatic Water Balance — Seasonal Breakdown
+
+Understanding *when* the water deficit is projected to change helps translate the annual
+SPEI signal into operational planning. Here we look at projected changes in the raw
+monthly P − PET balance.
+
+```{r fig-seasonal-balance, fig.height=8}
+climate_monthly %>%
+  as_tibble() %>%
+  filter(wsd_source_id %in% example_wsd) %>%
+  filter(drought_period %in% c("historical", "future")) %>%
+  mutate(period = recode(drought_period, historical = "Historical", future = "Future")) %>%
+  filter(input_window == "reporting" | reporting_period %in% TRUE) %>%
+  left_join(quartile_parks %>% select(park_unit, raw_spei_change_p50), by = "park_unit") %>%
+  mutate(
+    park_label = glue("{park_unit}  (Δ SPEI P50 = {round(raw_spei_change_p50, 3)})"),
+    month_name = factor(month.abb[month], levels = month.abb)
+  ) %>%
+  group_by(park_unit, park_label, month_name, period) %>%
+  summarise(
+    mean_balance = mean(monthly_balance, na.rm = TRUE),
+    p10_balance = quantile(monthly_balance, 0.10, na.rm = TRUE),
+    p90_balance = quantile(monthly_balance, 0.90, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  ggplot(aes(x = month_name, group = period)) +
+  geom_ribbon(aes(ymin = p10_balance, ymax = p90_balance, fill = period), alpha = 0.20) +
+  geom_line(aes(y = mean_balance, color = period), linewidth = 1.0) +
+  geom_hline(yintercept = 0, color = col_neutral, linewidth = 0.4, linetype = "dashed") +
+  scale_color_manual(values = c("Historical" = col_hist, "Future" = col_future), name = NULL) +
+  scale_fill_manual(values = c("Historical" = col_hist, "Future" = col_future), name = NULL) +
+  scale_x_discrete(guide = guide_axis(angle = 45)) +
+  facet_wrap(~ park_label, ncol = 2, scales = "free_y") +
+  labs(
+    title = "Monthly Climatic Water Balance (Precipitation − PET)",
+    subtitle = "Ribbon = P10–P90 across GCM ensemble. Below zero = evaporative demand exceeds supply.",
+    x = NULL,
+    y = "P − PET (mm/month)"
+  ) +
+  theme_rapid() +
+  theme(legend.key.width = unit(1.5, "cm"))
+```
+
+---
+
+# Interpretation Guide
+
+| Δ SPEI (P50) | Model agreement (% drying) | Interpretation |
+|---|---|---|
+| < −0.5 | > 70% | **High-confidence severe drying.** Strong consistent signal across models; major drought exposure risk. |
+| −0.5 to −0.2 | > 60% | **Moderate drying.** Meaningful but not extreme shift; monitor storage and reliability. |
+| −0.2 to 0.0 | Mixed | **Slight drying tendency.** Signal present but within noise range; low near-term concern. |
+| ~0.0 | Mixed | **Stable.** No meaningful projected change in drought conditions. |
+| > 0.0 | < 40% | **Wetting tendency.** Supply conditions projected to improve on average; verify with P90 for stress-testing. |
+
+> **P10 as a stress-test:** For long-term infrastructure decisions, `raw_spei_change_p10`
+> represents the pessimistic end of the model envelope — use it to design for a plausible
+> worst-case scenario even where the median signal is modest.
+>
+> **Future `-Inf` diagnostics:** `raw_spei_future_report_pct_neg_inf_months` records the
+> percentage of future reporting months where SPEI was unboundedly dry before capping.
+> Higher values suggest stronger or less stable drying signals and should be reviewed alongside
+> the main Δ SPEI metrics.
+>
+> **Scale sensitivity:** SPEI-12 captures multi-season hydrological drought. Parks relying on
+> small, flashy catchments may be better characterised with SPEI-3 or SPEI-6.
+
+---
