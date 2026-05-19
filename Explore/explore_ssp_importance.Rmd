@@ -1,0 +1,613 @@
+---
+title: "SSP and Model Contributions to Precipitation and Runoff Exposure"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    theme: flatly
+    highlight: tango
+    toc: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+    toc_depth: 3
+    number_sections: true
+    fig_width: 10
+    fig_height: 6
+    code_folding: show
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+# Overview
+
+This analysis explores patterns in how SSP pathways shape rapid indicator results for precipitation and runoff exposure. Are the dry and wet tails of the precipitation and runoff change distributions driven more by which SSP pathway a run follows, or by which climate model produced it?
+
+Percent change is calculated as the difference in mean annual water-year totals between a future period (2035–2065) and a historical baseline (1980–2010). (Reminder: negative values indicate drying or declining runoff; positive values indicate wetting.)
+
+```{r packages}
+source("setup.R")
+
+theme_rapid <- function(base_size = 12) {
+  theme_minimal(base_size = base_size) +
+    theme(
+      plot.title = element_text(face = "bold", size = base_size + 1),
+      plot.subtitle = element_text(color = "grey40", size = base_size - 1),
+      strip.text = element_text(face = "bold"),
+      panel.grid.minor = element_blank(),
+      legend.position = "bottom"
+    )
+}
+
+ssp_levels_raw <- c("ssp245", "ssp370", "ssp585")
+
+ssp_labels <- c(ssp245 = "SSP2-4.5",
+                ssp370 = "SSP3-7.0",
+                ssp585 = "SSP5-8.5")
+```
+
+# Data preparation
+
+Workflow to grab change in runoff and precip across the historical and future time periods for all model x ssp combos.
+
+```{r, eval = FALSE}
+get_precip_change_raw <- function(water_supplies,
+                                  precip_data  = "data/rapid/inputs/loca2_precipitation_water_supplies/",
+                                  hindcast = TRUE,
+                                  historical = c("1980", "2010"),
+                                  future = c("2035", "2065"),
+                                  water_year = TRUE) {
+  
+  hist_start_year <- as.integer(historical[1])
+  hist_end_year <- as.integer(historical[2])
+  future_start_year <- as.integer(future[1])
+  future_end_year <- as.integer(future[2])
+  
+  files <- if (hindcast) {
+    list.files(precip_data, full.names = TRUE) %>%
+      grep("training|livneh_unsplit", ., invert = TRUE, value = TRUE)
+  } else {
+    list.files(precip_data, full.names = TRUE) %>%
+      grep("2015|2045|2075|livneh_unsplit", ., value = TRUE)
+  }
+  
+  files_dt <- data.table(file = files)
+  
+  files_dt[, `:=`(
+    year_single = as.integer(str_extract(file, "(?<!\\d)(\\d{4})(?=\\.nc)")),
+    year_start = as.integer(str_extract(file, "(\\d{4})(?=-\\d{4})")),
+    year_end = as.integer(str_extract(file, "(?<=-)(\\d{4})(?=\\.)"))
+  )]
+  
+  files_dt[!is.na(year_single), `:=`(
+    year_start = year_single,
+    year_end = year_single
+  )]
+  
+  wyear_offset <- if (water_year) 1L else 0L
+  
+  files <- files_dt[
+    (year_end >= hist_start_year - wyear_offset & year_start <= hist_end_year) |
+      (year_end >= future_start_year - wyear_offset & year_start <= future_end_year)
+  ]$file
+  
+  if (length(files) == 0) {
+    stop("No precipitation files found. Check precip_data and analysis periods.")
+  }
+  
+  process_file <- function(f) {
+    raw <- read_parquet(f) %>%
+      filter(wsd_source_id %in% water_supplies$wsd_source_id)
+    
+    as.data.table(raw)[
+      ,
+      year := if (water_year) {
+        year(date) + fifelse(month(date) >= 10L, 1L, 0L)
+      } else {
+        year(date)
+      }
+    ][
+      (year >= hist_start_year & year <= hist_end_year) |
+        (year >= future_start_year & year <= future_end_year)
+    ][
+      ,
+      .(grid_precipitation = sum(value, na.rm = TRUE)),
+      by = .(wsd_source_id, year, park_unit, nc_file, cell_lon, cell_lat)
+    ][
+      ,
+      .(total_precipitation = mean(grid_precipitation, na.rm = TRUE)),
+      by = .(year, wsd_source_id, park_unit, nc_file)
+    ]
+  }
+  
+  combined <- map(files, process_file) %>%
+    bind_rows() %>%
+    setDT()
+  
+  suppressMessages(suppressWarnings({
+    combined[
+      nc_file == "Jay_Alder_pr_MWBM_LOCA2_training_195001-201412.nc",
+      nc_file := "Jay_Alder_pr_MWBM_LOCA2.historical.training.1950-2100.nc"
+    ]
+    
+    combined[
+      ,
+      c("var", "model", "ssp", "run", "nc", "misc1", "misc2", "misc3") :=
+        tstrsplit(nc_file, "\\.")
+    ]
+    
+    combined[
+      !ssp %in% c("ssp245", "ssp370", "ssp585", "historical"),
+      ssp := case_when(
+        grepl("livneh_unsplit", nc_file, ignore.case = TRUE) ~ "historical",
+        TRUE ~ str_extract(nc_file, "ssp\\d+")
+      )
+    ]
+    
+    combined[
+      !is.na(run),
+      c("run", "time") := tstrsplit(run, "_", fixed = TRUE)
+    ]
+  }))
+  
+  combined[, c("var", "nc") := NULL]
+  
+  ssps <- combined %>%
+    filter(!ssp %in% c("historical", "1950-2014")) %>%
+    distinct(model, ssp, run)
+  
+  map_dfr(seq_len(nrow(ssps)), function(i) {
+    s <- ssps[i, ]
+    
+    hist_base <- combined %>%
+      filter(model == s$model, ssp == "historical",
+        run == s$run, year >= hist_start_year, year <= hist_end_year)
+    
+    hist_gap <- combined %>%
+      filter(model == s$model, ssp == s$ssp,
+        run == s$run, year >= hist_start_year, year <= hist_end_year,
+        !year %in% unique(hist_base$year))
+    
+    hist_summary <- bind_rows(hist_base, hist_gap) %>%
+      group_by(wsd_source_id, park_unit) %>%
+      summarize(precipitation_historical = mean(total_precipitation, na.rm = TRUE),
+                .groups = "drop")
+    
+    fut_summary <- combined %>%
+      filter(model == s$model, ssp == s$ssp,
+        run == s$run, year >= future_start_year, year <= future_end_year) %>%
+      group_by(wsd_source_id, park_unit) %>%
+      summarize(precipitation_future = mean(total_precipitation, na.rm = TRUE),
+                .groups = "drop")
+    
+    inner_join(fut_summary, hist_summary, by = c("wsd_source_id", "park_unit")) %>%
+      mutate(model = s$model,
+             ssp = s$ssp,
+             run = s$run,
+        percent_change = (precipitation_future - precipitation_historical) /
+          precipitation_historical * 100)
+  })
+}
+
+get_runoff_change_raw <- function(water_supplies,
+                                  runoff_data = "data/rapid/inputs/loca2_runoff_water_supplies/",
+                                  hindcast = TRUE,
+                                  historical = c("1980", "2010"),
+                                  future = c("2035", "2065"),
+                                  water_year = TRUE) {
+  
+  hist_start_year <- as.integer(historical[1])
+  hist_end_year <- as.integer(historical[2])
+  future_start_year <- as.integer(future[1])
+  future_end_year <- as.integer(future[2])
+  
+  files <- if (hindcast) {
+    list.files(runoff_data, full.names = TRUE) %>%
+      grep("training", ., invert = TRUE, value = TRUE)
+  } else {
+    list.files(runoff_data, full.names = TRUE) %>%
+      grep("2015-2100|training", ., value = TRUE)
+  }
+  
+  if (length(files) == 0) {
+    stop("No runoff files found. Check runoff_data and analysis periods.")
+  }
+  
+  process_file <- function(f) {
+    raw <- read_parquet(f) %>%
+      filter(wsd_source_id %in% water_supplies$wsd_source_id)
+    
+    as.data.table(raw)[
+      ,
+      year := if (water_year) {
+        year(date) + fifelse(month(date) >= 10L, 1L, 0L)
+      } else {
+        year(date)
+      }
+    ][
+      (year >= hist_start_year & year <= hist_end_year) |
+        (year >= future_start_year & year <= future_end_year)
+    ][
+      ,
+      .(grid_runoff = sum(value, na.rm = TRUE)),
+      by = .(wsd_source_id, year, park_unit, nc_file, cell_lon, cell_lat)
+    ][
+      ,
+      .(total_runoff = mean(grid_runoff, na.rm = TRUE)),
+      by = .(year, wsd_source_id, park_unit, nc_file)
+    ]
+  }
+  
+  combined <- map(files, process_file) %>%
+    bind_rows() %>%
+    setDT()
+  
+  suppressMessages(suppressWarnings({
+    combined[
+      nc_file == "Jay_Alder_runoff_MWBM_LOCA2_training_195001-201412.nc",
+      nc_file := "Jay_Alder_runoff_MWBM_LOCA2.historical.training.1950-2100.nc"
+    ]
+    
+    combined[
+      ,
+      c("var", "model", "ssp", "run", "nc") :=
+        tstrsplit(nc_file, "\\.")
+    ]
+    
+    combined[
+      !is.na(run),
+      c("run", "time") := tstrsplit(run, "_", fixed = TRUE)
+    ]
+  }))
+  
+  combined[, c("var", "nc") := NULL]
+  
+  ssps <- combined %>%
+    filter(ssp != "historical") %>%
+    distinct(model, ssp, run)
+  
+  map_dfr(seq_len(nrow(ssps)), function(i) {
+    s <- ssps[i, ]
+    
+    hist_base <- combined %>%
+      filter(model == s$model, ssp == "historical",
+             run == s$run, year >= hist_start_year, year <= hist_end_year)
+    
+    hist_gap <- combined %>%
+      filter(model == s$model, ssp == s$ssp,
+             run == s$run, year >= hist_start_year, year <= hist_end_year,
+             !year %in% unique(hist_base$year))
+    
+    hist_summary <- bind_rows(hist_base, hist_gap) %>%
+      group_by(wsd_source_id, park_unit) %>%
+      summarize(runoff_historical = mean(total_runoff, na.rm = TRUE),
+                .groups = "drop")
+    
+    fut_summary <- combined %>%
+      filter(model == s$model, ssp == s$ssp,
+             run == s$run, year >= future_start_year, year <= future_end_year) %>%
+      group_by(wsd_source_id, park_unit) %>%
+      summarize(runoff_future = mean(total_runoff, na.rm = TRUE),
+                .groups = "drop")
+    
+    inner_join(fut_summary, hist_summary, by = c("wsd_source_id", "park_unit")) %>%
+      mutate(model = s$model, ssp = s$ssp, run = s$run,
+             percent_change = (runoff_future - runoff_historical) /
+               runoff_historical * 100)
+  })
+}
+
+water_supplies <- get_wsd(rapid = TRUE)
+
+region_lut <- water_supplies %>%
+  sf::st_drop_geometry() %>%
+  distinct(park_unit, region)
+
+precip_raw <- get_precip_change_raw(water_supplies = water_supplies %>% select(wsd_source_id, park_unit)) %>%
+  left_join(region_lut, by = "park_unit") %>%
+  filter(ssp %in% ssp_levels_raw) %>%
+  mutate(variable = "Precipitation",
+         ssp = factor(ssp, levels = ssp_levels_raw, labels = ssp_labels[ssp_levels_raw]))
+
+runoff_raw <- get_runoff_change_raw(water_supplies = water_supplies %>% select(wsd_source_id, park_unit)) %>%
+  left_join(region_lut, by = "park_unit") %>%
+  filter(ssp %in% ssp_levels_raw) %>%
+  mutate(variable = "Runoff",
+         ssp = factor(ssp, levels = ssp_levels_raw, labels = ssp_labels[ssp_levels_raw]))
+
+change_raw <- bind_rows(precip_raw, runoff_raw)
+# save so you don't need to run again (it's slow)
+write_parquet(change_raw, "data/dissertation/change_raw.parquet")
+```
+
+```{r}
+change_raw <- read_parquet("data/dissertation/change_raw.parquet") %>%
+  mutate(ssp = factor(ssp, levels = ssp_labels[ssp_levels_raw]))
+```
+
+# Results
+
+## SSP composition of selected percentiles
+
+If SSP pathway were the primary driver of our rapid precip/runoff outcomes, we would expect the wettest runs to come predominantly from a single SSP, and the driest to come from antoher SSP. Mimmicking our exposure indicator workflows, the figure below tests this concept by identifying, for each water supply, the model x SSP closest to the p10, p50, and p90 of its local distribution, then tallys the SSPs those runs belong to.
+
+Dotted lines mark equal thirds... what perfect SSP "balance" would look like.
+
+```{r}
+selected_percentile_summary <- change_raw %>%
+  group_by(variable, park_unit, region, wsd_source_id) %>%
+  mutate(p10_target = quantile(percent_change, 0.10, na.rm = TRUE),
+         p50_target = median(percent_change, na.rm = TRUE),
+         p90_target = quantile(percent_change, 0.90, na.rm = TRUE)) %>%
+  ungroup() %>%
+  pivot_longer(cols = c(p10_target, p50_target, p90_target),
+               names_to = "percentile",
+               values_to = "target_percentile_value") %>%
+  mutate(percentile = recode(percentile,
+                             p10_target = "p10",
+                             p50_target = "p50",
+                             p90_target = "p90"),
+         diff_from_target = abs(percent_change - target_percentile_value)) %>%
+  group_by(variable, park_unit, region, wsd_source_id, percentile) %>%
+  slice_min(diff_from_target, n = 1, with_ties = FALSE) %>%
+  ungroup() %>%
+  mutate(percentile = factor(percentile, levels = c("p10", "p50", "p90"))) %>%
+  count(variable, percentile, ssp, name = "n_selected") %>%
+  group_by(variable, percentile) %>%
+  mutate(total_selected = sum(n_selected),
+         fraction = n_selected / total_selected) %>%
+  ungroup()
+
+ggplot(selected_percentile_summary,
+       aes(x = percentile, y = fraction, fill = ssp)) +
+  geom_col(colour = "white", linewidth = 0.3) +
+  geom_hline(yintercept = c(1/3, 2/3),
+             linetype = "dotted", colour = "grey40", linewidth = 0.4) +
+  scale_y_continuous(labels = percent_format(accuracy = 1),
+                     expand = expansion(mult = c(0, 0.02))) +
+  scale_fill_brewer(palette = "Set2", name = "SSP") +
+  facet_wrap(~ variable) +
+  labs(title = "SSP Composition of Selected Percentile Values",
+       x = "Selected percentile",
+       y = "Fraction of selected values") +
+  theme_rapid()
+```
+
+## SSP composition of tails
+
+The same question, asked more sharply: among all model x SSPs that fall in the driest (\<= p10) or wettest (\>= p90) tail for a given water supply, what share belongs to each SSP? Departure from that pattern indicates that model structure (and not the SSP scenario) is sorting runs into extremes.
+
+```{r}
+tail_membership <- change_raw %>%
+  group_by(variable, park_unit, region, wsd_source_id) %>%
+  mutate( p10_value = quantile(percent_change, 0.10, na.rm = TRUE),
+          p90_value = quantile(percent_change, 0.90, na.rm = TRUE)) %>%
+  ungroup() %>%
+  mutate(tail = case_when(percent_change <= p10_value ~ "Driest tail: <= p10",
+                          percent_change >= p90_value ~ "Wettest tail: >= p90",
+                          TRUE ~ NA_character_)) %>%
+  filter(!is.na(tail)) %>%
+  mutate(tail = factor(tail, levels = c("Driest tail: <= p10",
+                                        "Wettest tail: >= p90")))
+
+tail_ssp_fractions_pooled <- tail_membership %>%
+  count(variable, tail, ssp, name = "n_model_runs") %>%
+  group_by(variable, tail) %>%
+  mutate(total_tail_model_runs = sum(n_model_runs),
+         fraction = n_model_runs / total_tail_model_runs) %>%
+  ungroup()
+
+ggplot(tail_ssp_fractions_pooled,
+       aes(x = tail, y = fraction, fill = ssp)) +
+  geom_col(colour = "white", linewidth = 0.3) +
+  geom_hline(yintercept = c(1/3, 2/3),
+             linetype = "dotted", colour = "grey40", linewidth = 0.4) +
+  scale_y_continuous(labels = percent_format(accuracy = 1),
+                     expand = expansion(mult = c(0, 0.02))) +
+  scale_fill_brewer(palette = "Set2", name = "SSP") +
+  facet_wrap(~ variable) +
+  labs(title = "SSP Composition of Ensemble Tails",
+       subtitle = "Tails defined per water supply, then pooled.",
+       x = NULL,
+       y = "Fraction of tail model-runs") +
+  theme_rapid()
+```
+
+## Model enrichment in regional tails
+
+Code Claude recommended this one... The "enrichment" metric below is log₂(tail fraction / background fraction), and can show whether specific climate models appear in the tails more often than what we'd expect based on their overall representation in the model ensemble. A value of 1 (redder) means a model is twice as prevalent in the tail as its share of the full ensemble would predict; −1 means half as prevalent.
+
+```{r}
+model_background <- change_raw %>%
+  distinct(variable, model, ssp, run) %>%
+  count(variable, model, name = "n_background_model_runs") %>%
+  group_by(variable) %>%
+  mutate(background_fraction = n_background_model_runs /
+           sum(n_background_model_runs)) %>%
+  ungroup()
+
+model_tail_region <- tail_membership %>%
+  count(variable, region, tail, model, name = "n_tail_model_runs") %>%
+  group_by(variable, region, tail) %>%
+  mutate(tail_fraction = n_tail_model_runs / sum(n_tail_model_runs)) %>%
+  ungroup() %>%
+  left_join(model_background, by = c("variable", "model")) %>%
+  mutate(enrichment_log2 = log2(tail_fraction / background_fraction))
+
+model_tail_region %>%
+  group_by(variable, region, tail) %>%
+  slice_max(abs(enrichment_log2), n = 12, with_ties = FALSE) %>%
+  ungroup() %>%
+  mutate(model = fct_reorder(model, enrichment_log2)) %>%
+  ggplot(aes(x = model, y = region, fill = enrichment_log2)) +
+  geom_tile(colour = "white", linewidth = 0.25) +
+  facet_grid(variable ~ tail, scales = "free_x", space = "free_x") +
+  scale_fill_gradient2(low = "#2166AC", mid = "white", high = "#B2182B",
+                       midpoint = 0,
+                       name = "log\u2082(tail / background)") +
+  labs(title = "Model Enrichment in Regional Ensemble Tails",
+       subtitle = "Red = overrepresented; blue = underrepresented relative to background ensemble share.",
+       x = "Climate model",
+       y = "Region") +
+  theme_rapid() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 7),
+        panel.spacing.x = unit(0.6, "lines"))
+```
+
+AWI-CM-1-1-MR stands out as the dominant contributor to dry tails across regions...
+
+```{r}
+model_tail_region %>%
+  filter(model == "AWI-CM-1-1-MR",
+         tail == "Driest tail: <= p10") %>%
+  ggplot(aes(x = region, y = tail_fraction, fill = variable)) +
+  geom_col(position = "dodge", colour = "white", linewidth = 0.3) +
+  scale_y_continuous(labels = percent_format(accuracy = 1)) +
+  labs(title = "AWI-CM-1-1-MR Contribution to Regional Driest Tails",
+       subtitle = "Consistent dry-tail dominance across regions points to model-structural drivers.",
+       x = "Region",
+       y = "Fraction of dry-tail model-runs",
+       fill = "Variable") +
+  theme_rapid() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1))
+```
+
+... and to a much lesser extent, HadGEM3-GC31-MM contributes to the most wet tail models across regions...
+
+```{r}
+model_tail_region %>%
+  filter(model == "HadGEM3-GC31-MM",
+         tail == "Wettest tail: >= p90") %>%
+  ggplot(aes(x = region, y = tail_fraction, fill = variable)) +
+  geom_col(position = "dodge", colour = "white", linewidth = 0.3) +
+  scale_y_continuous(labels = percent_format(accuracy = 1)) +
+  labs(title = "HadGEM3-GC31-MM Contribution to Regional Wettest Tails",
+       x = "Region",
+       y = "Fraction of wet-tail model-runs",
+       fill = "Variable") +
+  theme_rapid() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1))
+```
+
+## SSP vs. model concentration
+
+Another Claude Code idea... The previous figures describe enrichment directionally. This final analysis summarizes how concentrated the tails are by SSP versus by climate model, using a normalized Herfindahl–Hirschman Index (HHI). A normalized HHI of 0 means the tail is perfectly spread across all groups; 1 means a single group accounts for everything. Higher values for "Climate model" than "SSP pathway" would confirm that model identity is the stronger organizer of tail outcomes. The only place this does not seem to be the case in the Pacific West Region...
+
+```{r}
+calc_normalized_hhi <- function(x) {
+  x <- x[!is.na(x)]
+  n <- length(x)
+  if (n <= 1) return(NA_real_)
+  hhi <- sum(x^2)
+  (hhi - 1/n) / (1 - 1/n)
+}
+
+ssp_concentration <- tail_membership %>%
+  count(variable, region, tail, ssp, name = "n") %>%
+  group_by(variable, region, tail) %>%
+  mutate(fraction = n / sum(n)) %>%
+  summarize(concentration = calc_normalized_hhi(fraction),
+            .groups = "drop") %>%
+  mutate(group_type = "SSP pathway")
+
+model_concentration <- tail_membership %>%
+  count(variable, region, tail, model, name = "n") %>%
+  group_by(variable, region, tail) %>%
+  mutate(fraction = n / sum(n)) %>%
+  summarize(concentration = calc_normalized_hhi(fraction),
+            .groups = "drop") %>%
+  mutate(group_type = "Climate model")
+
+bind_rows(ssp_concentration, model_concentration) %>%
+  ggplot(aes(x = group_type, y = concentration, fill = group_type)) +
+  geom_col(width = 0.65, colour = "white", linewidth = 0.3) +
+  facet_grid(variable + tail ~ region) +
+  scale_y_continuous(limits = c(0, 0.20),
+                     labels = percent_format(accuracy = 1)) +
+  labs(title = "Are Regional Tails More Concentrated by SSP or by Climate Model?",
+       subtitle = "Normalized HHI: higher values indicate stronger dominance by a small number of groups.",
+       x = NULL,
+       y = "Normalized HHI",
+       fill = NULL) +
+  theme_rapid() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1),
+        panel.spacing.x = unit(0.5, "lines"))
+```
+
+# Sensitivity check: what happens if we remove SSP3-7.0?
+
+For every water supply, grab the raw percent-change value of the model x SSP nearest to p10, p50, and p90 — once using all three SSPs, and once with SSP3-7.0 removed — then take the difference.
+
+```{r}
+change_bracket <- change_raw %>%
+  filter(ssp %in% c("SSP2-4.5", "SSP5-8.5")) %>%
+  mutate(ssp = factor(ssp, levels = c("SSP2-4.5", "SSP5-8.5")))
+
+nearest_percentile_values <- function(df) {
+  df %>%
+    filter(is.finite(percent_change)) %>%
+    group_by(variable, wsd_source_id, park_unit, region) %>%
+    mutate(p10_target = quantile(percent_change, 0.10, na.rm = TRUE),
+           p50_target = median(percent_change,         na.rm = TRUE),
+           p90_target = quantile(percent_change, 0.90, na.rm = TRUE)) %>%
+    ungroup() %>%
+    pivot_longer(cols  = c(p10_target, p50_target, p90_target),
+      names_to  = "percentile",
+      values_to = "target_value") %>%
+    mutate(percentile = recode(percentile,
+                               p10_target = "p10",
+                               p50_target = "p50",
+                               p90_target = "p90"),
+           diff_from_target = abs(percent_change - target_value)) %>%
+    group_by(variable, wsd_source_id, park_unit, region, percentile) %>%
+    slice_min(diff_from_target, n = 1, with_ties = FALSE) %>%
+    ungroup() %>%
+    select(variable, wsd_source_id, park_unit, region,
+           percentile, percent_change, model, ssp)}
+
+pct_full <- nearest_percentile_values(change_raw)
+pct_bracket <- nearest_percentile_values(change_bracket)
+
+pct_shift <- pct_full %>%
+  rename(value_all_ssps = percent_change,
+         model_all_ssps = model,
+         ssp_all_ssps = ssp) %>%
+  inner_join(pct_bracket %>%
+               rename(value_no_ssp370 = percent_change,
+                      model_no_ssp370 = model,
+                      ssp_no_ssp370   = ssp),
+             by = c("variable", "wsd_source_id", "park_unit", "region", "percentile")) %>%
+  mutate(delta = value_no_ssp370 - value_all_ssps,
+         percentile = factor(percentile, levels = c("p10", "p50", "p90")))
+
+pct_shift %>%
+  filter(variable == "Precipitation") %>%
+  ggplot(aes(x = delta, fill = percentile)) +
+  geom_histogram(binwidth = 0.5, colour = "white", linewidth = 0.2,
+                 position = "identity", alpha = 0.7) +
+  geom_vline(xintercept = 0, linetype = "dashed",
+             colour = "grey30", linewidth = 0.5) +
+  scale_fill_brewer(palette = "Set1", name = "Percentile") +
+  facet_wrap(~ percentile, ncol = 1) +
+  labs(title = "Precipitation: Delta per Water Supply After SSP3-7.0 Removal",
+       subtitle = "Delta = value without SSP3-7.0 \u2212 value with all SSPs.",
+       x = "Delta (percentage points)",
+       y = "Number of water supplies") +
+  theme_rapid()
+
+pct_shift %>%
+  filter(variable == "Runoff") %>%
+  ggplot(aes(x = delta, fill = percentile)) +
+  geom_histogram(binwidth = 0.5, colour = "white", linewidth = 0.2,
+                 position = "identity", alpha = 0.7) +
+  geom_vline(xintercept = 0, linetype = "dashed",
+             colour = "grey30", linewidth = 0.5) +
+  scale_fill_brewer(palette = "Set1", name = "Percentile") +
+  facet_wrap(~ percentile, ncol = 1) +
+  labs(title = "Runoff: Delta per Water Supply After SSP3-7.0 Removal",
+              subtitle = "Delta = value without SSP3-7.0 \u2212 value with all SSPs.",
+       x = "Delta (percentage points)",
+       y = "Number of water supplies") +
+  theme_rapid()
+```
