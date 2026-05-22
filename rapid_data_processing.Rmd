@@ -238,14 +238,13 @@ Aggregates the gridded data above to single monthly value for each water supply 
 process_drought_data(water_supplies,
                      precip_data = "data/rapid/inputs/loca2_precipitation_water_supplies/",
                      pet_data = "data/rapid/inputs/loca2_pet_water_supplies/",
-                     hindcast = FALSE,
+                     hindcast = TRUE,
                      historical = c("1979", "2014"),
                      future = c("2015", "2065"),
                      water_year = TRUE,
-                     output_dir = "data/rapid/outputs/",
+                     output_dir = "data/rapid/inputs/",
                      verbose = TRUE)
 
-# takes 2.5 hours... why!
 ```
 
 
