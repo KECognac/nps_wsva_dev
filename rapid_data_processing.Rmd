@@ -177,8 +177,8 @@ walk(runoff_data, ~process_loca2_mwbm(.x,
                                       output_dir = "data/rapid/inputs/loca2_runoff_water_supplies/", 
                                       water_supplies = water_supplies %>% select(park_unit, wsd_source_id), 
                                       var = "runoff",
-                                      historical = c("1980-01-01", "2024-12-31"),
-                                      future = c("2025-01-01", "2100-12-31")))
+                                      historical = c("1979-01-01", "2014-12-31"),
+                                      future = c("2015-01-01", "2100-12-31")))
 
 # took 24 minutes
 ```
@@ -186,15 +186,15 @@ walk(runoff_data, ~process_loca2_mwbm(.x,
 ### Precipitation
 
 ```{r}
-precip_data <- list.files("data/all/loca2_mwbm/", full.names = TRUE, pattern = "pr_|precip|pr.")
+precip_data <- grep("livneh", list.files("data/all/loca2_mwbm/", full.names = TRUE, pattern = "pr_|precip|pr."), value = TRUE, invert = TRUE)
 
 # Process all NetCDF files using helper function
 walk(precip_data, ~try(process_loca2_mwbm(.x, 
-                                      output_dir = "data/rapid/inputs/loca2_precipitation_water_supplies/", 
-                                      water_supplies = water_supplies %>% select(park_unit, wsd_source_id), 
-                                      var = "pr",
-                                      historical = c("1980-01-01", "2024-12-31"),
-                                      future = c("2025-01-01", "2100-12-31"))))
+                                          output_dir = "data/rapid/inputs/loca2_precipitation_water_supplies/", 
+                                          water_supplies = water_supplies %>% select(park_unit, wsd_source_id), 
+                                          var = "pr",
+                                          historical = c("1979-01-01", "2014-12-31"),
+                                          future = c("2015-01-01", "2100-12-31"))))
 
 # took 57 minutes
 ```
@@ -209,9 +209,8 @@ walk(snow_data, ~process_loca2_mwbm(.x,
                                     output_dir = "data/rapid/inputs/loca2_swe_water_supplies/", 
                                     water_supplies = water_supplies %>% select(park_unit, wsd_source_id), 
                                     var = "swe",
-                                    historical = c("1980-01-01", "2024-12-31"),
-                                    future = c("2025-01-01", "2100-12-31")))
-
+                                    historical = c("1979-01-01", "2014-12-31"),
+                                    future = c("2015-01-01", "2100-12-31")))
 # took 57 minutes
 ```
 
@@ -225,10 +224,27 @@ walk(pet_data, ~process_loca2_mwbm(.x,
                                    output_dir = "data/rapid/inputs/loca2_pet_water_supplies/", 
                                    water_supplies = water_supplies %>% select(park_unit, wsd_source_id), 
                                    var = "pet",
-                                   historical = c("1980-01-01", "2024-12-31"),
-                                   future = c("2025-01-01", "2100-12-31")))
+                                   historical = c("1979-01-01", "2014-12-31"),
+                                   future = c("2015-01-01", "2100-12-31")))
 
 # took 24 minutes
+```
+
+### Drought Data
+
+Aggregates the gridded data above to single monthly value for each water supply for SPEI drought calculations.
+
+```{r}
+process_drought_data(water_supplies,
+                     precip_data = "data/rapid/inputs/loca2_precipitation_water_supplies/",
+                     pet_data = "data/rapid/inputs/loca2_pet_water_supplies/",
+                     hindcast = TRUE,
+                     historical = c("1979", "2014"),
+                     future = c("2015", "2065"),
+                     water_year = TRUE,
+                     output_dir = "data/rapid/inputs/",
+                     verbose = TRUE)
+
 ```
 
 

@@ -134,7 +134,7 @@ fire_exp <- calc_fire_exposure(
 runoff_exp <- calc_runoff_exposure(water_supplies = water_supplies,
                                    runoff_data = "data/rapid/inputs/loca2_runoff_water_supplies/",
                                    hindcast = TRUE,
-                                   historical = c(1995, 2024),
+                                   historical = c(1980, 2010),
                                    future = c(2035, 2065),
                                    water_year = TRUE,
                                    save = TRUE,
@@ -151,7 +151,7 @@ runoff_exp <- calc_runoff_exposure(water_supplies = water_supplies,
 precip_exp <- calc_precip_exposure(water_supplies = water_supplies,
                                    precip_data = "data/rapid/inputs/loca2_precipitation_water_supplies/",
                                    hindcast = TRUE,
-                                   historical = c(1995, 2024),
+                                   historical = c(1980, 2010),
                                    future = c(2035, 2065),
                                    water_year = TRUE,
                                    save = TRUE,
@@ -168,7 +168,7 @@ precip_exp <- calc_precip_exposure(water_supplies = water_supplies,
 swe_exp <- calc_swe_exposure(water_supplies = water_supplies,
                              swe_data = "data/rapid/inputs/loca2_swe_water_supplies/",
                              hindcast = TRUE,
-                             historical = c(1995, 2024),
+                             historical = c(1980, 2010),
                              future = c(2035, 2065),
                              water_year = TRUE,
                              save = TRUE,
@@ -176,6 +176,23 @@ swe_exp <- calc_swe_exposure(water_supplies = water_supplies,
                              verbose = TRUE)
 
 # 9.5 minutes for 1148 water sources when hindcast = TRUE
+```
+
+## Drought as SPEI
+
+```{r}
+drought_exp <- calc_drought_exposure(water_supplies,
+                                     drought_data = "data/rapid/inputs/loca2_drought_monthly_1980-2010_2035-2065_hindcast-TRUE.parquet",
+                                     spei_scale = 12,
+                                     spei_inf_cap = 4,
+                                     historical = c(1980, 2010),
+                                     future = c(2035, 2065),
+                                     water_year = TRUE,
+                                     save = TRUE,
+                                     output_dir = "data/rapid/outputs",
+                                     verbose = TRUE)
+
+# took 29 mins
 ```
 
 ## Sea Level Rise Inundation
@@ -297,7 +314,7 @@ Historical LOCA precip data goes up to 2018:
 ```{r}
 precip_sen <- calc_precip_sensitivity(water_supplies,
                                       precip_data = "data/rapid/inputs/loca2_precipitation_water_supplies/",
-                                      historical = c(1980, 2018),
+                                      historical = c(1980, 2010),
                                       water_year = TRUE,
                                       save = TRUE,
                                       output_dir = "data/rapid/outputs/",
