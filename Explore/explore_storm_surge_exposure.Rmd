@@ -1,0 +1,206 @@
+---
+title: "Storm Surge Exposure Exploration"
+author: "NPS Water Vulnerability"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+editor_options:
+  markdown:
+    wrap: 80
+---
+
+The purpose of this notebook is to explore the results from the storm surge
+exposure analysis. For each of 4 CMIP6 models we compute the change in 100-year
+return period storm surge level (future 2021-2050 minus historical 1985-2014).
+Each NPS water supply is assigned the worst-case model surge change from its
+nearest coastal station, divided by distance to coast. Water supplies whose
+nearest surge station is more than 50 km away receive NA.
+
+Data are generated in `rapid_workflow.Rmd` using `calc_storm_surge_exposure()`.
+Raw surge stations are preprocessed by `process_storm_surge_data()`.
+
+# Interpretation
+
+`raw_surge_change_max` is the change in the 100-year return period (RP100) surge
+height (in meters) at the nearest coastal model node, computed as future
+(2021–2050) minus historical (1985–2014) under SSP5-8.5, divided by
+`shore_dist_m` (distance to coast in meters). The division weights exposure by
+coastal proximity: the same surge change matters more for a supply close to the
+coast than one near the 50 km boundary.
+
+The worst-case value across the 4 CMIP6 models is retained for each station, so
+`raw_surge_change_max` reflects the most adverse projected outcome rather than
+a model mean.
+
+The metric captures only the *change in surge dynamics* driven by altered storm
+climatology; it does not include mean sea level rise, which is addressed
+separately by the sea level rise inundation indicator.
+
+Water supplies more than 50 km from the nearest coastal surge station receive
+`NA` — they are considered outside the domain of meaningful coastal surge
+exposure regardless of surge magnitude at the nearest station.
+
+# Data source
+
+Source: Muis et al. (2023), distributed through the Copernicus Climate Data
+Store (CDS), dataset `storm_surge_muis_2023/` (local path).
+
+## What was downloaded
+
+| Field | Value | What it means |
+|---|---|---|
+| **Model** | CMCC-CM2-VHR4, EC-Earth3P-HR, HadGEM3-GC31-HM, HadGEM3-GC31-HM-SST | High-resolution HighResMIP models — chosen because coarse models underestimate tropical cyclone-driven surges |
+| **Period** | 1985–2014 (historical), 2021–2050 (future) | Historical baseline vs. near-future projection window |
+| **Variable** | Surge level | Meteorological surge component in meters — not total water level, not SLR |
+| **Statistic** | 100-year return period (RP100), best-fit bound | Upper-tail surge height representative of a 1-in-100-year event over each 30-year period |
+| **Experiment** | Historical, Future | Historical = ERA5-forced run; Future = SSP5-8.5 forced run |
+| **Derived variable** | Absolute value | Actual surge height in meters — not already a change value; the change is computed in `process_storm_surge_data()` |
+
+## What we are trying to calculate: 
+
+How much storm surge is projected to change at 
+a given water supply. We are not considering tides and mean sea level rise as a 
+part of this analysis. 
+
+## How we are calculating this risk: 
+
+The Global Tide and Surge Model v3.0 (GTSM) is 
+a 2D hydrodynamic model. For each climate model run, hourly wind speed and surface
+pressure fields are used to force GTSM, which sumulates the resulting surge height
+at ~43,000 coastal stations globally (roughly one every ~5-10km along coastlines).
+
+Over each 30-year period GTSM produces a time series of hourly surge heights at
+each coastal station. The 100-year return period (RP100) is the surge height
+expected to be exceeded on average once every 100 years — an extreme but
+plausible event.
+
+For each of the 4 models, `process_storm_surge_data()` computes:
+
+```
+surge_change = future_rp100 (2021–2050) − historical_rp100 (1985–2014)
+```
+
+The worst-case value across the 4 models is retained per station. 
+`calc_storm_surge_exposure()` then assigns each water supply the surge change 
+from its nearest station, with a 50 km distance cutoff.
+
+TODO: Add percent change calculation
+TODO: What do these time series actually look like?
+TODO: Exceedance probability
+
+# Establish environment
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+source("setup.R")
+mapviewOptions(fgb = FALSE)
+```
+
+# Load data
+
+## Water supplies
+
+```{r}
+water_supplies <- get_wsd(rapid = TRUE)
+```
+
+## Storm surge stations (preprocessed CONUS subset)
+
+```{r}
+storm_surge_stations <- sf::st_read(
+  here("data", "rapid", "inputs", "storm_surge", "storm_surge_exposure_conus.gpkg"),
+  quiet = TRUE
+)
+```
+
+## Storm surge exposure results
+
+Check for a saved CSV first; fall back to running the calc function if none exists.
+
+```{r}
+exp_files <- list.files(
+  here("data", "rapid", "outputs"),
+  pattern    = "^storm_surge_exposure_.*\\.csv$",
+  full.names = TRUE
+)
+
+if (length(exp_files) > 0) {
+  storm_surge_exp <- read_csv(exp_files[length(exp_files)], show_col_types = FALSE)
+} else {
+  storm_surge_exp <- calc_storm_surge_exposure(
+    water_supplies       = water_supplies,
+    storm_surge_stations = here("data", "rapid", "inputs", "storm_surge",
+                                "storm_surge_exposure_conus.gpkg"),
+    save       = TRUE,
+    output_dir = here("data", "rapid", "outputs"),
+    verbose    = TRUE
+  )
+}
+```
+
+## Join results to water supply geometries
+
+```{r}
+ws_mapped <- water_supplies %>%
+  inner_join(
+    storm_surge_exp %>% select(-park_unit, -park_name),
+    by = "wsd_source_id"
+  )
+```
+
+# Maps
+
+## Water supplies and surge stations colored by worst-case surge change
+
+Higher values (red) indicate greater projected storm surge increase. Grey points
+are water supplies more than 50 km from the nearest surge station
+(`raw_surge_change_max = NA`).
+
+```{r}
+pal <- colorRampPalette(c("green", "yellow", "red"))
+
+ws_exposed <- ws_mapped %>% filter(!is.na(raw_surge_change_max))
+ws_distant <- ws_mapped %>% filter(is.na(raw_surge_change_max))
+
+mapview(ws_exposed,
+        zcol        = "norm_surge_change_max",
+        col.regions = pal,
+        layer.name  = "Storm Surge Change (norm)",
+        popup       = leafpop::popupTable(
+          sf::st_drop_geometry(ws_exposed) %>%
+            select(wsd_source_id, park_name,
+                   raw_surge_change_max,
+                   norm_surge_change_max,
+                   rank_surge_change_max)
+        )) +
+  mapview(ws_distant,
+          col.regions = "grey60",
+          color       = "grey60",
+          layer.name  = ">50 km from surge station",
+          popup       = leafpop::popupTable(
+            sf::st_drop_geometry(ws_distant) %>%
+              select(wsd_source_id, park_name,
+                     raw_surge_change_max,
+                     norm_surge_change_max,
+                     rank_surge_change_max)
+          )) 
+```
+
+## CONUS storm surge stations colored by worst-case surge change
+
+```{r}
+mapview(storm_surge_stations,
+        zcol        = "max_surge_change_m",
+        col.regions = pal,
+        layer.name  = "Surge change (m)",
+        popup       = leafpop::popupTable(
+          sf::st_drop_geometry(storm_surge_stations) %>%
+            select(lon, lat, max_surge_change_m, max_surge_model)
+        ))
+```
+
+
