@@ -1,0 +1,366 @@
+---
+title: "Explore_GW_Depths"
+author: "KEC"
+date: "2026-05-22"
+output: html_document
+---
+
+This R-markdown explores opportunities to use a dataset of modeled groundwater depth estimates as a sensitivity indicator for the CONUS-wide WSVA. 
+
+First, we explore agreement between static groundwater levels documented in the NPS Water Supply Database and modeled groundwater levels from the machine-learning (ML) model groundwater depth dataset published in 2026 - https://ngwa.onlinelibrary.wiley.com/doi/10.1111/gwat.13362. The CONUS-wide modeled depth dataset was developed using a random forest (RF) model based on available WTD observations. Authors found good agreement between modeled depths and well observations (Pearson correlation coefficient (r) of 0.96 (0.81 during testing), Nash-Sutcliffe efficiency (NSE) of 0.93 (0.65 during testing), and root mean square error (RMSE) of 6.87 m (15.31 m during testing)).
+
+Next, we extract values for all points in the WSD.
+
+
+# Setup
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Import libraries
+
+```{r libraries, include = FALSE}
+
+source("setup.R")
+
+```
+
+# Download Full Dataset
+
+This code chunk attempted to download the full CONUS-wide tif of modeled groundwater table depths (WTD) but the 36 GB dataset downloads very slowly ~ 8 hours. Instead, in subsequent chunks, we first pull a subset of points where the NPS WSD has recorded static water level depths and compare them to the the published modeled depths. Then, since those look good, we run an extraction for all WSD points.
+
+```{r download_data}
+
+# This takes over 6 hours because of zenodo's slow speed. Try with vscurl below
+
+#url <- "https://zenodo.org/records/18504963/files/wtd_mean_estimate_RF_additional_inputs_dummy_drop0LP_1s_CONUS2_m_v_20240813.tif?download=1"
+
+#dir.create("data/all/groundwater_depth", recursive = TRUE, showWarnings = FALSE)
+
+# Download is large so use aria2c
+#system(paste(
+#  "aria2c",
+#  "-x 16",
+#  "-s 16",
+#  "-k 10M",
+#  "--out=data/all/groundwater_depth/wtd_mean_estimate.tif",
+#  shQuote(url)
+#))
+
+
+```
+
+# Import WSD + static depths
+
+Here, we'll pull in the water supply database, filter to only include points that have recorded static water levels, and then we'll extract modeled groundwater depths using two methods:
+1. A point extraction for the exact WSD point location.
+2. A 4km buffer around the point extracting the mean, min, and max groundwater depth.
+
+This workflow takes about 30 minutes to download modeled data, but since results are saved in tabular form, it takes almost no time to re-run once downloaded. 
+
+```{r download_data_subset}
+
+# --- 1. Load water supply points ---
+wsd_full <- get_wsd(rapid = TRUE) %>%
+  st_transform(5070) 
+
+# --- 1.1 Fitler DB to only include rows where a static depth to water is 
+#          recorded in source notes:
+extract_static_depth <- function(notes) {
+  # Match "static water level" followed by a number (handles ft/feet)
+  pattern <- "static(?:\\s+water)?\\s+(?:water\\s+)?level(?:\\s+is)?(?:\\s+at)?\\s+([0-9.]+)\\s*(?:ft|feet)"
+  
+  val <- str_match(str_to_lower(notes), pattern)[, 2]
+  
+  # Handle the edge case in row 19: "static depth 75 feet"
+  alt_pattern <- "static\\s+depth\\s+([0-9.]+)\\s*(?:ft|feet)"
+  alt_val <- str_match(str_to_lower(notes), alt_pattern)[, 2]
+  
+  # Use primary match, fall back to alt
+  result <- coalesce(val, alt_val)
+  
+  as.numeric(result)
+}
+
+# Apply to dataframe
+wsd <- wsd_full %>%
+  dplyr::filter(grepl("static", source_notes, ignore.case = TRUE)) %>%
+  mutate(static_depth_ft = extract_static_depth(source_notes))
+
+mapview(wsd,
+        zcol = "static_depth_ft",
+        layer.name = "Static Depth (ft)")
+
+```
+
+Now we'll loop through parks with static water levels in the WSD and extract:
+1. the point value
+2. the mean, min, and max values from the 4km buffer around the well site.
+
+```{r dl_mean_wl}
+
+# Whether or not to download new values. Set to FALSE because this was already run. Instead imports.
+download <- FALSE
+
+# file name for saving results
+fname <- "data/all/groundwater_depth/static_depth_exploration.csv"
+
+if (download) {
+  
+  url <- "/vsicurl/https://zenodo.org/records/18504963/files/wtd_mean_estimate_RF_additional_inputs_dummy_drop0LP_1s_CONUS2_m_v_20240813.tif?download=1"
+  wtd <- rast(url)
+  
+  unique_parks <- unique(wsd$park_unit)
+  results <- vector("list", length(unique_parks))
+  
+  for (i in seq_along(unique_parks)) {
+    
+    park <- unique_parks[i]
+    park_wsd <- wsd[wsd$park_unit == park, ]
+    cat(sprintf("Processing %d of %d: %s (%d points)\n", i, length(unique_parks), park, nrow(park_wsd)))
+    
+    tryCatch({
+      # --- Crop raster ONCE for the whole park ---
+      park_buf_all <- st_buffer(park_wsd, dist = 4000)
+      park_buf_native <- st_transform(park_buf_all, crs(wtd, proj = TRUE))
+      park_bbox <- st_bbox(park_buf_native)
+      wtd_crop <- crop(wtd, ext(park_bbox["xmin"], park_bbox["xmax"], 
+                                park_bbox["ymin"], park_bbox["ymax"]))
+      
+      # --- Extract per point within the park crop ---
+      point_results <- vector("list", nrow(park_wsd))
+      
+      for (j in seq_len(nrow(park_wsd))) {
+        
+        buf_j <- st_buffer(park_wsd[j, ], dist = 4000) %>%
+          st_transform(crs(wtd, proj = TRUE))
+        
+        point_j <- park_wsd[j, ] %>%
+          st_transform(crs(wtd, proj = TRUE))
+        
+        wtd_masked <- mask(wtd_crop, vect(buf_j))
+        
+        # Extract value at the point itself
+        point_val <- terra::extract(wtd_crop, vect(point_j))[1, 2]
+        
+        point_results[[j]] <- data.frame(
+          wsd_source_id = park_wsd$wsd_source_id[j],
+          park_unit     = park,
+          park_name     = park_wsd$park_name[j],
+          wtd_point_m   = point_val,                              # exact point value
+          wtd_mean_m    = global(wtd_masked, "mean", na.rm = TRUE)[1, 1],
+          wtd_min_m     = global(wtd_masked, "min",  na.rm = TRUE)[1, 1],
+          wtd_max_m     = global(wtd_masked, "max",  na.rm = TRUE)[1, 1]
+        )
+      }
+      
+      results[[i]] <- bind_rows(point_results)
+      
+    }, error = function(e) {
+      cat(sprintf("  Failed: %s\n", e$message))
+      results[[i]] <<- data.frame(
+        wsd_source_id = park_wsd$wsd_source_id,
+        park_unit     = park,
+        park_name     = park_wsd$park_name,
+        wtd_mean_m = NA, wtd_min_m = NA, wtd_max_m = NA
+      )
+    })
+  }
+  
+  wtd_results <- results %>% bind_rows()
+  
+  wtd_results_join <- wsd %>%
+    st_drop_geometry() %>%                          # drop sf geometry for clean join
+    dplyr::left_join(wtd_results, by = "wsd_source_id") %>%   # unique ID only
+    dplyr::mutate(static_depth_m = 0.3048 * static_depth_ft)
+  
+  wtd_results_join %>% view()
+  
+  # Save results
+  write.csv(wtd_results_join, fname, row.names = FALSE)
+
+}
+  
+```
+
+# Compare results
+
+There are only 14 water supply locations with groundwater depth information and a relatively limited depth range. However, given the small n, the bias, r, and NSE of the point extraction method are all good and similar to reported model performance metrics (r = 0.92, NSE = 0.81, and bias = 0.78m). 
+
+```{r compare_wtd}
+
+# Import results
+wtd_results_join <- read_csv(fname)
+
+# --- Calculate performance stats per extraction method ---
+stats_df <- wtd_results_join %>%
+  tidyr::pivot_longer(
+    cols = c(wtd_point_m, wtd_mean_m),
+    names_to = "extraction_method",
+    values_to = "wtd_modeled_m",
+    names_transform = list(extraction_method = ~recode(.,
+      wtd_point_m = "Point extraction",
+      wtd_mean_m  = "4km buffer mean"
+    ))
+  ) %>%
+  filter(!is.na(wtd_modeled_m) & !is.na(static_depth_m)) %>%
+  group_by(extraction_method) %>%
+  summarise(
+    n     = n(),
+    r     = cor(static_depth_m, wtd_modeled_m, use = "complete.obs"),
+    r2    = r^2,
+    nse = 1 - (sum((wtd_modeled_m - static_depth_m)^2) / 
+           sum((static_depth_m - mean(static_depth_m))^2)),
+    rmse  = sqrt(mean((wtd_modeled_m - static_depth_m)^2, na.rm = TRUE)),
+    bias  = mean(wtd_modeled_m - static_depth_m, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(label = sprintf("n = %d\nr = %.2f\nR² = %.2f\nNSE = %.2f\nRMSE = %.2f m\nBias = %.2f m",
+                       n, r, r2, nse, rmse, bias))
+
+# --- Plot ---
+wtd_results_join %>%
+  tidyr::pivot_longer(
+    cols = c(wtd_point_m, wtd_mean_m),
+    names_to = "extraction_method",
+    values_to = "wtd_modeled_m",
+    names_transform = list(extraction_method = ~recode(.,
+      wtd_point_m = "Point extraction",
+      wtd_mean_m  = "4km buffer mean"
+    ))
+  ) %>%
+  ggplot(aes(x = static_depth_m, y = wtd_modeled_m)) +
+  geom_smooth(method = "lm", color = "steelblue", fill = "steelblue", alpha = 0.2) +
+  geom_errorbar(
+    data = ~filter(., extraction_method == "4km buffer mean"),
+    aes(ymin = wtd_min_m, ymax = wtd_max_m),
+    width = 0.5, color = "gray60"
+  ) +
+  geom_abline(linetype = "dashed", color = "gray40") +
+  geom_point() +
+  geom_text(
+    data = stats_df,
+    aes(label = label),
+    x = -Inf, y = Inf,
+    hjust = -0.1, vjust = 1.2,
+    size = 3.2, inherit.aes = FALSE,
+    fontface = "plain", family = "mono"
+  ) +
+  facet_wrap(~extraction_method) +
+  theme_bw() +
+  labs(
+    x     = "Observed DTW (m)",
+    y     = "Modeled DTW (m)",
+    title = "Compare National GW Depth Model to NP Water Supply Depths"
+  )
+
+```
+
+The results look pretty good for the point values. Now, we'll extract point values
+for all water supply points.
+
+
+```{r get_all_values}
+
+download <- FALSE
+fname <- "data/all/groundwater_depth/wtd_all_sites.csv"
+
+if (download) {
+  
+  # Drop missing coordinates
+  wsd_full <- wsd_full %>%
+    filter(!is.na(st_coordinates(.)[,1]))  # drop any points with missing geometry
+  
+  wtd_diag <- terra::rast("/vsicurl/https://zenodo.org/records/18504963/files/wtd_mean_estimate_RF_additional_inputs_dummy_drop0LP_1s_CONUS2_m_v_20240813.tif?download=1")
+  
+  # Transform all points at once
+  points_native <- wsd_full %>%
+    st_transform(crs(wtd_diag, proj = TRUE))
+  
+  # Single extract call across all points
+  wtd_all_sites <- wsd_full %>%
+    st_drop_geometry() %>%
+    mutate(wtd_point_m = terra::extract(wtd_diag, vect(points_native))[, 2]) %>%
+    select(wsd_source_id, park_unit, park_name, wtd_point_m)
+  
+  write.csv(wtd_all_sites,
+            fname,
+            row.names = FALSE)
+
+}
+
+```
+
+
+View results for all sites:
+
+```{r view_results}
+
+# Read in results 
+wtd_all_sites <- read_csv(fname)
+
+# Download all parks (for plotting)
+#all_parks <- getParkSystem()
+#all_parks_buffer <- all_parks %>%
+#  st_buffer(4000)
+
+# Join to wsd_full
+wtd_all_wsd <- wsd_full %>%
+  dplyr::left_join(wtd_all_sites, 
+                   by = c("wsd_source_id", "park_unit", "park_name"))
+
+# View
+mapview(wtd_all_wsd,
+        zcol = "wtd_point_m",
+        cex = 6) 
+
+```
+
+
+# View missing values
+
+All missing values occur along the CONUS border, on islands, or along coastlines/lakeshores. This seems like a reasonable limitation to the dataset. We should attempt to fill in datagaps for sites without groundwater depth information. Just peeking at the exported table below, some sites have groundwater depth information in the description.
+
+```{r view_missing}
+
+missing_depths <- wtd_all_wsd %>%
+  dplyr::filter(is.na(wtd_point_m))
+
+mapview(missing_depths,
+        zcol = "source_type")
+
+write.csv(missing_depths,
+            "data/all/groundwater_depth/wtd_missing_depths.csv",
+            row.names = FALSE)
+
+
+missing_depths %>%
+  select(park_name, park_unit, description, gwudi, source_type, well_depth) %>%
+  mutate(
+    well_depth = ifelse(is.na(well_depth), "—", well_depth)) %>%
+  st_drop_geometry() %>%
+  kable(
+    format    = "html",
+    escape    = FALSE,
+    col.names = c("Park name", "Unit", "Description", "GWUDI", "Source type", "Well depth"),
+    align     = c("l", "l", "l", "c", "l", "r")
+  ) %>%
+  kable_styling(
+    bootstrap_options = c("hover", "striped"),
+    full_width        = TRUE,
+    font_size         = 13
+  ) %>%
+  column_spec(1, bold = FALSE, width = "20%") %>%
+  column_spec(3, width = "28%") %>%
+  column_spec(6, italic = TRUE) %>%
+  row_spec(0, bold = TRUE, font_size = 12, color = "#666", extra_css = "text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1.5px solid #ccc;")
+
+```
+
+# Next steps --
+
+There are several other sites that likely have groundwater depth information embedded within other NPS files - e.g., East Entrance well at Zion and Bryce Canyon East Creek Valley. Could be worth-while to add this information to the database to get a more complete picture of performance. 
+
+
+
+
