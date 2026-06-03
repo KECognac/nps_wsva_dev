@@ -204,7 +204,7 @@ storm_surge_exp <- calc_storm_surge_exposure(
   water_supplies        = water_supplies,
   storm_surge_stations  = here("data", "rapid", "inputs", "storm_surge",
                                 "storm_surge_exposure_conus.gpkg"),
-  shore_distances       = here("data", "rapid", "inputs", "coast_comp", "shore_distances.csv"),
+  coast_distances       = here("data", "rapid", "inputs", "coast_comp", "coast_distances.csv"),
   save       = TRUE,
   output_dir = here("data", "rapid", "outputs"),
   verbose    = TRUE
@@ -247,7 +247,7 @@ slr_inundation_exp <- calc_inundation_exposure(
 swi_exp <- calc_swi_exposure(
   water_supplies  = water_supplies,
   swi_pts         = here("data", "rapid", "inputs", "swi", "swi_points.gpkg"),
-  shore_distances = here("data", "rapid", "inputs", "coast_comp", "shore_distances.csv"),
+  coast_distances = here("data", "rapid", "inputs", "coast_comp", "coast_distances.csv"),
   save            = TRUE,
   output_dir      = here("data", "rapid", "outputs"),
   verbose         = TRUE

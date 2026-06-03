@@ -211,10 +211,11 @@ process_drought_data(water_supplies,
 # Process Inundation Data Files
 
 ```{r}
-inundation_data <- process_inundation_data(coast_dir_path = here("data", "all", "coast_comp_data"),
-                                           water_supplies = water_supplies,
-                                           save       = TRUE,
-                                           output_dir = here("data", "rapid", "inputs", "coast_comp"))
+inundation_data <- process_inundation_data(
+  coast_dir_path = here("data", "all", "coast_comp_data"), 
+  water_supplies = water_supplies, 
+  save           = TRUE, 
+  output_dir     = here("data", "rapid", "inputs", "coast_comp"))
 # took under 5 minutes
 ```
 
