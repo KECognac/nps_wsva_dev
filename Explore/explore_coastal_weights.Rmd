@@ -2,23 +2,60 @@
 title: "Coastal Weights Exploration"
 author: "Juan De La Torre"
 date: "`r Sys.Date()`"
-output:
-  html_document:
-    code_folding: hide
+output: html_document
 editor_options:
   markdown:
     wrap: 80
 ---
 
 Explore the output of `process_coastal_weights()` — distance to the nearest
-NOAA CUSP shoreline feature for each NPS water supply. Water supplies > 50 km
-from the coast receive `NA` and are excluded from coastal exposure indicators.
+NOAA CUSP shoreline feature and the derived weight applied to coastal exposure
+indicators (SWI, storm surge). Weight decays linearly from 1 at the shoreline
+to 0 at 50 km. Water supplies > 50 km from the coast receive `NA`.
 
-`shore_dist_m` is used directly as the denominator in both `calc_swi_exposure()`
-and `calc_storm_surge_exposure()`. For SWI, dividing the raw migration value by
-`shore_dist_m` gives the fraction of the land-to-coast corridor projected to be
-intruded — a dimensionless ratio with a direct physical interpretation (per
-Jasechko et al. 2020 and PR #134 reviewer discussion).
+I think this makes more sense than dividing the results from our exposure indicators
+by distance to coast. Dividing by distance to coast introduces the possibility of
+increasing the exposure value, and the changes to the values are basically unbounded.
+My reasoning is that when we weight these data we want to use the exposure values 
+that have been assigned to them as their "maximum potential" exposure for that
+indicator and tweak that value down, but not up. I also think that this bounds 
+the potential transformations to the exposure indicators in a way that makes
+this weighting easier to use and interpret.
+
+Here are some simple calculations to demonstrate these points.
+
+Dividing by distance to coast makes those water supplies that are very
+close to the coast explode in vulnerability.
+
+$$
+x = \text{exposure indicator value} \\
+dist = \text{distance to coast} \\
+\text{weighted exposure} = \frac{x}{dist} \\
+x = 1 \\
+dist = 0.01 \\
+\text{weighted exposure} = \frac{1}{0.01} = 100
+$$
+Just because the site is very close to the coast does not mean that it's exposure
+should get that much bigger after it is weighted.
+
+Here is how this same example would look like with this weighting method:
+
+$$
+\text{weighted exposure} = x \times (\frac{max_{dist}-dist}{max_{dist}}) \\
+\text{In this case } max_{dist} = 50\text{km (or 50000m)} \\
+\text{Lets plug x and dist in} \\
+\text{weighted exposure} = 1 \times (\frac{50 - 0.01}{50}) = 1 \times (0.998) = 0.998
+$$
+With this method the exposure value did get a little smaller, but that makes more
+sense than it getting way bigger. Between 0.998 and 100 I think that 0.998 is better 
+weighted. Now let's see an example with something like a water supply 10km away.
+
+$$
+\text{weighted exposure} = \frac{x}{dist} = \frac{1}{10} = 0.1\\
+\text{weighted exposure} = x \times (\frac{max_{dist}-dist}{max_{dist}}) = 1 \times (\frac{50-10}{50}) = 0.8\\
+$$
+I think the point is clear, just wanted to expand on it since the original idea 
+was to divide by distance to coast and I deviated from that.
 
 # Setup
 
@@ -33,13 +70,45 @@ mapviewOptions(fgb = FALSE)
 
 # Load data
 
-```{r load-water-supplies}
-water_supplies <- get_wsd(rapid = TRUE) 
+```{r}
+parks <- getParkSystem()
+
+park_centroids <- parks %>%
+  st_centroid() %>%
+  st_transform(4326) %>%
+  dplyr::mutate(y = st_coordinates(.)[, 2], x = st_coordinates(.)[, 1])
+
+water_supplies <- read_excel(
+  here("data", "Water_Supply_Systems", "NPS_Water_Systems_Database_Joined.xlsx"),
+  sheet = 1,
+  na    = c("NA", "U"),
+  skip  = 1
+) %>%
+  dplyr::mutate(
+    source_longitude = as.numeric(source_longitude),
+    source_latitude  = as.numeric(source_latitude)
+  ) %>%
+  filter(!state %in% c("AK", "AS", "HI", "MP", "PR", "VI")) %>%
+  left_join(
+    park_centroids %>%
+      st_drop_geometry() %>%
+      dplyr::select(UNIT_CODE, x, y),
+    by = c(park_unit = "UNIT_CODE")
+  ) %>%
+  dplyr::mutate(
+    source_longitude = ifelse(is.na(source_longitude), x, source_longitude),
+    source_latitude  = ifelse(is.na(source_latitude),  y, source_latitude)
+  ) %>%
+  filter(!str_detect(source_type, regex("municipal|hauled", ignore_case = TRUE))) %>%
+  drop_na(source_longitude, source_latitude) %>%
+  st_as_sf(coords = c("source_longitude", "source_latitude"),
+           crs    = 4326,
+           remove = FALSE)
 ```
 
 ```{r}
-shore_distances <- read_csv(
-  here("data", "rapid", "inputs", "coast_comp", "shore_distances.csv"),
+coastal_weights <- read_csv(
+  here("data", "rapid", "inputs", "coast_comp", "coastal_weights.csv"),
   show_col_types = FALSE
 )
 ```
@@ -55,13 +124,13 @@ cusp <- st_read(
 ```{r}
 ws_mapped <- water_supplies %>%
   left_join(
-    shore_distances %>% select(-park_unit, -park_name),
+    coastal_weights %>% select(-park_unit, -park_name),
     by = "wsd_source_id"
   )
 
 # Find nearest point on CUSP shoreline for each coastal water supply
 ws_coastal <- ws_mapped %>%
-  filter(!is.na(shore_dist_m)) %>%
+  filter(!is.na(coastal_weight)) %>%
   st_transform(5070)
 
 nearest_idx <- st_nearest_feature(ws_coastal, cusp)
@@ -78,13 +147,13 @@ coast_pts <- nearest_lines %>%
 
 # Map
 
-Color scales with `shore_dist_m` — red means close to coast (low distance),
-green means near the 50 km boundary (high distance). **Grey** points are
-non-coastal (> 50 km from coast, `shore_dist_m = NA`). **Black** points are
+Color scales with `coastal_weight` — red means close to coast (weight near 1),
+green means near the 50 km boundary (weight near 0). **Grey** points are
+non-coastal (> 50 km from coast, `coastal_weight = NA`). **Black** points are
 the nearest CUSP shoreline location to each coastal water supply.
 
 ```{r}
-pal <- colorRampPalette(c("red", "yellow", "green"))
+pal <- colorRampPalette(c("green", "yellow", "red"))
 
 mapview(coast_pts,
         col.regions = "black",
@@ -92,12 +161,12 @@ mapview(coast_pts,
         cex         = 3,
         layer.name  = "Nearest Coast Point") +
   mapview(ws_mapped,
-          zcol        = "shore_dist_m",
+          zcol        = "coastal_weight",
           col.regions = pal,
           na.color    = "grey",
-          layer.name  = "Distance to Coast (m)",
+          layer.name  = "Coastal Weight",
           popup       = leafpop::popupTable(
             sf::st_drop_geometry(ws_mapped) %>%
-              select(wsd_source_id, park_name, shore_dist_m)
+              select(wsd_source_id, park_name, shore_dist_m, coastal_weight)
           ))
 ```
