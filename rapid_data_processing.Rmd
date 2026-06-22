@@ -10,48 +10,7 @@ This workflow includes importing and organizing of datasets for the rapid workfl
 ```{r}
 source("setup.R")
 
-parks <- getParkSystem()
-
-park_centroids <- parks %>% 
-  st_centroid() %>% 
-  st_transform(4326) %>% 
-  dplyr::mutate(y = st_coordinates(.)[,2], x = st_coordinates(.)[,1])
-
-# water supplies
-table_path <- "data/Water_Supply_Systems/NPS_Water_Systems_Database_Joined.xlsx"
-
-
-water_supplies <- read_excel(table_path,
-                             sheet = 1,
-                             na = c("NA", "U"),
-                             skip = 1) %>%
-  dplyr::mutate(
-    source_longitude = as.numeric(source_longitude),
-    source_latitude = as.numeric(source_latitude)
-  ) %>%
-  filter(!state %in% c("AK", "AS", "HI", "MP", "PR", "VI")) %>%
-  left_join(
-    park_centroids %>% 
-      st_drop_geometry() %>% 
-      dplyr::select(UNIT_CODE, x, y),
-    by = c(park_unit = "UNIT_CODE")
-  ) %>% dplyr::mutate(
-    coords_flag = ifelse(
-      is.na(source_longitude) |
-        is.na(source_latitude),
-      "Centroid",
-      "Source Coordinates"
-    ),
-    source_longitude = ifelse(is.na(source_longitude), x, source_longitude),
-    source_latitude = ifelse(is.na(source_latitude), y, source_latitude)
-  ) %>%
-  # remove municipal and hauled source types, accounting for database entry errors
-  filter(!str_detect(source_type, regex("municipal|hauled", ignore_case = TRUE))) %>%
-  drop_na(source_longitude, source_latitude) %>%
-  st_as_sf(coords = (c("source_longitude", "source_latitude")),
-           crs = 4326,
-           remove = FALSE)
-
+water_supplies <- get_wsd(rapid = TRUE)
 ```
 
 # Create File Structure
@@ -173,9 +132,9 @@ st_write(pyromes, "data/rapid/inputs/pyromes.gpkg", append = FALSE)
 runoff_data <- list.files("data/all/loca2_mwbm/", full.names = TRUE, pattern = "*runoff")
 
 # Process all NetCDF files using helper function
-walk(runoff_data, ~process_loca2_mwbm(.x, 
-                                      output_dir = "data/rapid/inputs/loca2_runoff_water_supplies/", 
-                                      water_supplies = water_supplies %>% select(park_unit, wsd_source_id), 
+walk(runoff_data, ~process_loca2_mwbm(.x,
+                                      output_dir = "data/rapid/inputs/loca2_runoff_water_supplies/",
+                                      water_supplies = water_supplies %>% select(park_unit, wsd_source_id),
                                       var = "runoff",
                                       historical = c("1979-01-01", "2014-12-31"),
                                       future = c("2015-01-01", "2100-12-31")))
@@ -189,9 +148,9 @@ walk(runoff_data, ~process_loca2_mwbm(.x,
 precip_data <- grep("livneh", list.files("data/all/loca2_mwbm/", full.names = TRUE, pattern = "pr_|precip|pr."), value = TRUE, invert = TRUE)
 
 # Process all NetCDF files using helper function
-walk(precip_data, ~try(process_loca2_mwbm(.x, 
-                                          output_dir = "data/rapid/inputs/loca2_precipitation_water_supplies/", 
-                                          water_supplies = water_supplies %>% select(park_unit, wsd_source_id), 
+walk(precip_data, ~try(process_loca2_mwbm(.x,
+                                          output_dir = "data/rapid/inputs/loca2_precipitation_water_supplies/",
+                                          water_supplies = water_supplies %>% select(park_unit, wsd_source_id),
                                           var = "pr",
                                           historical = c("1979-01-01", "2014-12-31"),
                                           future = c("2015-01-01", "2100-12-31"))))
@@ -205,12 +164,13 @@ walk(precip_data, ~try(process_loca2_mwbm(.x,
 snow_data <- grep("livneh", list.files("data/all/loca2_mwbm/", full.names = TRUE, pattern = "snow"), value = TRUE, invert = TRUE)
 
 # Process all NetCDF files using helper function
-walk(snow_data, ~process_loca2_mwbm(.x, 
-                                    output_dir = "data/rapid/inputs/loca2_swe_water_supplies/", 
-                                    water_supplies = water_supplies %>% select(park_unit, wsd_source_id), 
+walk(snow_data, ~process_loca2_mwbm(.x,
+                                    output_dir = "data/rapid/inputs/loca2_swe_water_supplies/",
+                                    water_supplies = water_supplies %>% select(park_unit, wsd_source_id),
                                     var = "swe",
                                     historical = c("1979-01-01", "2014-12-31"),
                                     future = c("2015-01-01", "2100-12-31")))
+
 # took 57 minutes
 ```
 
@@ -220,9 +180,9 @@ walk(snow_data, ~process_loca2_mwbm(.x,
 pet_data <- list.files("data/all/loca2_mwbm/", full.names = TRUE, pattern = "pet_")
 
 # Process all NetCDF files using helper function
-walk(pet_data, ~process_loca2_mwbm(.x, 
-                                   output_dir = "data/rapid/inputs/loca2_pet_water_supplies/", 
-                                   water_supplies = water_supplies %>% select(park_unit, wsd_source_id), 
+walk(pet_data, ~process_loca2_mwbm(.x,
+                                   output_dir = "data/rapid/inputs/loca2_pet_water_supplies/",
+                                   water_supplies = water_supplies %>% select(park_unit, wsd_source_id),
                                    var = "pet",
                                    historical = c("1979-01-01", "2014-12-31"),
                                    future = c("2015-01-01", "2100-12-31")))
@@ -251,9 +211,11 @@ process_drought_data(water_supplies,
 # Process Inundation Data Files
 
 ```{r}
-inundation_data <- process_inundation_data(coast_dir_path = here("data", "all", "coast_comp_data"),
-                                           water_supplies = water_supplies,
-                                           output_dir = here("data", "rapid", "inputs", "coast_comp"))
+inundation_data <- process_inundation_data(
+  coast_dir_path = here("data", "all", "coast_comp_data"), 
+  water_supplies = water_supplies, 
+  save           = TRUE, 
+  output_dir     = here("data", "rapid", "inputs", "coast_comp"))
 # took under 5 minutes
 ```
 
@@ -262,7 +224,20 @@ inundation_data <- process_inundation_data(coast_dir_path = here("data", "all", 
 ```{r}
 process_swi_data(
   data_path  = here("data", "all", "coast_comp_data", "adams_swi_2024", "data", "output_data.txt"),
+  save       = TRUE,
   output_dir = here("data", "rapid", "inputs", "swi")
+)
+```
+
+# Storm Surge Exposure Preprocessing
+
+Filter the Muis et al. (2023) global 100-yr return period storm surge NetCDF to CONUS stations and save as a GeoPackage for use by `calc_storm_surge_exposure()`.
+
+```{r}
+process_storm_surge_data(
+  data_dir   = here("data", "all", "coast_comp_data", "storm_surge_muis_2023/"),
+  save       = TRUE,
+  output_dir = here("data", "rapid", "inputs", "storm_surge")
 )
 ```
 
@@ -272,6 +247,7 @@ process_swi_data(
 process_coastal_weights(
   water_supplies = water_supplies,
   cusp_dir_path  = here("data", "all", "coast_comp_data", "NOAA_CUSP"),
+  save           = TRUE,
   output_dir     = here("data", "rapid", "inputs", "coast_comp")
 )
 ```
