@@ -2,7 +2,9 @@
 title: "Saltwater Intrusion Exposure Indicator — Exploration"
 author: "NPS Water Vulnerability"
 date: "`r Sys.Date()`"
-output: html_document
+output:
+  html_document:
+    code_folding: hide
 editor_options:
   markdown:
     wrap: 80
@@ -41,12 +43,11 @@ swi_results <- read_csv(swi_csv)
 
 # MAP
 
-Water supply points assigned an SWI exposure value are colored by rank, sized
-by coastal weight, and outlined in black. Each is connected by a black line to
-the SWI estimation point used to assign its value. SWI points used in the
-assignment are colored by their raw Case_C value (no border). Water supplies
-more than 50 km from any SWI point are grey with a black border. SWI points
-not matched to any water supply are grey.
+Water supply points assigned an SWI exposure value are colored by normalized
+SWI migration and connected by a line to the SWI estimation point used to
+assign their value. Matched SWI points are colored by their raw Case_C value;
+unmatched points are grey. Water supplies more than 50 km from any SWI point
+are grey.
 
 ```{r build-map}
 # Join results onto water supply geometries
@@ -56,22 +57,20 @@ ws_mapped <- water_supplies %>%
     by = "wsd_source_id"
   )
 
-# Coastal water supplies only (those with an assigned SWI value)
-ws_coastal <- ws_mapped %>%
-  filter(!is.na(raw_swi_migration)) %>%
-  st_transform(5070)
+ws_exposed <- ws_mapped %>% filter(!is.na(raw_swi_migration))
+ws_distant <- ws_mapped %>% filter(is.na(raw_swi_migration))
 
-swi_proj <- st_transform(swi_pts, 5070)
+# Project for nearest-neighbor geometry, then build connector lines
+ws_exposed_proj <- st_transform(ws_exposed, 5070)
+swi_proj        <- st_transform(swi_pts, 5070)
 
-# Find nearest SWI point for each coastal water supply
-nearest_idx <- st_nearest_feature(ws_coastal, swi_proj)
+nearest_idx <- st_nearest_feature(ws_exposed_proj, swi_proj)
 used_idx    <- unique(nearest_idx)
 swi_used    <- swi_proj[used_idx, ]  %>% st_transform(4326)
 swi_unused  <- swi_proj[-used_idx, ] %>% st_transform(4326)
 
-# Build lines connecting each water supply to its matched SWI point
 connector_lines <- st_nearest_points(
-  ws_coastal,
+  ws_exposed_proj,
   swi_proj[nearest_idx, ],
   pairwise = TRUE
 ) %>%
@@ -80,45 +79,42 @@ connector_lines <- st_nearest_points(
 
 pal <- colorRampPalette(c("green", "yellow", "red"))
 
-# Scale point size by coastal_weight
-point_size <- ifelse(
-  is.na(ws_mapped$coastal_weight),
-  2,
-  scales::rescale(ws_mapped$coastal_weight, to = c(3, 8))
-)
-
 mapview(swi_unused,
-        col.regions = "grey",
-        color       = "grey",
-        cex         = 4,
-        layer.name  = "SWI Points (unused)") +
+        col.regions = "grey60",
+        color       = "grey60",
+        cex         = 3,
+        layer.name  = "SWI points (unmatched)") +
   mapview(connector_lines,
-        color      = "black",
-        lwd        = 1,
-        layer.name = "WS → SWI connection") +
+          color      = "black",
+          lwd        = 1,
+          layer.name = "WS → SWI point") +
   mapview(swi_used,
           zcol        = "Case_C",
           col.regions = pal,
           color       = NA,
           cex         = 5,
           pch         = 18,
-          layer.name  = "SWI Points (Case_C)",
+          layer.name  = "SWI points (matched)",
           popup       = leafpop::popupTable(
             sf::st_drop_geometry(swi_used) %>%
               select(watershed_id, Case_C)
           )) +
-  mapview(ws_mapped,
-          zcol        = "rank_swi_migration",
+  mapview(ws_exposed,
+          zcol        = "norm_swi_migration",
           col.regions = pal,
-          na.color    = "grey",
-          color       = "black",
-          lwd         = 2,
-          cex         = point_size,
-          layer.name  = "SWI Exposure (rank)",
+          layer.name  = "SWI Exposure (norm)",
           popup       = leafpop::popupTable(
-            sf::st_drop_geometry(ws_mapped) %>%
+            sf::st_drop_geometry(ws_exposed) %>%
               select(wsd_source_id, park_name, raw_swi_migration,
-                     norm_swi_migration, rank_swi_migration, coastal_weight)
+                     norm_swi_migration, rank_swi_migration)
+          )) +
+  mapview(ws_distant,
+          col.regions = "grey60",
+          color       = "grey60",
+          layer.name  = ">50 km from SWI point",
+          popup       = leafpop::popupTable(
+            sf::st_drop_geometry(ws_distant) %>%
+              select(wsd_source_id, park_name)
           ))
 ```
 
@@ -131,6 +127,143 @@ resolve the the issue of SWI assignment crossing channels, and runs into the
 issue of no assignment when the closest SWI point is just off the coast, like 
 many of the points on the Cape Cod National Seashore.
 
-You will also notice that there are water supplies that have a coastal weight
-but no SWI assignment. That means that during the coastal weighting calculation
-they were within 50km of a coastline, but not within 50km of a SWI point. 
+You will also notice that some water supplies have a `coast_dist_m` value but
+no SWI assignment. That means they were within 50 km of the coastline (and so
+received a coastal distance) but not within 50 km of any SWI estimation point.
+
+# Decay function weighting (alternative)
+
+Instead of dividing by `coast_dist_m`, this approach multiplies the raw Case_C
+value by a linear decay weight: `1 - (coast_dist_m / 50000)`. The weight is
+1.0 at the shoreline and 0.0 at the 50 km cutoff (0–1 range, ~5x variation).
+Whether this produces meaningfully different rankings than the division approach
+depends on whether distance variation or Case_C variation dominates — the chunk
+below shows the ranges.
+
+## Range of variation
+
+```{r range-check}
+coast_dist_df <- read_csv(
+  here("data", "rapid", "inputs", "coast_comp", "coast_distances.csv"),
+  show_col_types = FALSE
+)
+
+range_df <- ws_exposed %>%
+  sf::st_drop_geometry() %>%
+  select(wsd_source_id, raw_swi_migration) %>%
+  mutate(case_c_raw = swi_proj[nearest_idx, ]$Case_C) %>%
+  left_join(coast_dist_df %>% select(wsd_source_id, coast_dist_m),
+            by = "wsd_source_id")
+
+cat("Case_C (raw SWI migration, meters):\n")
+print(summary(range_df$case_c_raw))
+
+cat("\ncoast_dist_m (distance to coast, meters):\n")
+print(summary(range_df$coast_dist_m))
+
+cat("\nraw_swi_migration (Case_C / coast_dist_m):\n")
+print(summary(range_df$raw_swi_migration))
+
+cat("\nCase_C range ratio (max/min of absolute values):\n")
+abs_vals <- abs(range_df$case_c_raw[range_df$case_c_raw > 0])
+cat(round(max(abs_vals) / min(abs_vals), 1), "x\n")
+
+cat("\ncoast_dist_m range ratio (max/min):\n")
+d <- range_df$coast_dist_m[!is.na(range_df$coast_dist_m) & range_df$coast_dist_m > 0]
+cat(round(max(d) / min(d), 1), "x\n")
+```
+
+## Build decay-weighted results
+
+```{r build-decay}
+# nearest_idx and swi_proj already built in the map chunk
+decay_results <- ws_exposed %>%
+  sf::st_drop_geometry() %>%
+  select(wsd_source_id, park_unit, park_name) %>%
+  mutate(swi_case_c = swi_proj[nearest_idx, ]$Case_C) %>%
+  left_join(coast_dist_df, by = c("wsd_source_id", "park_unit", "park_name")) %>%
+  mutate(
+    decay_weight       = pmax(0, 1 - (coast_dist_m / 50000)),
+    raw_swi_decay      = swi_case_c * decay_weight
+  ) %>%
+  select(wsd_source_id, park_unit, park_name, raw_swi_decay) %>%
+  add_standardized_indicators("raw_swi_decay", invert = FALSE)
+
+ws_decay        <- water_supplies %>%
+  left_join(decay_results, by = c("wsd_source_id", "park_unit", "park_name"))
+ws_decay_exposed <- ws_decay %>% filter(!is.na(raw_swi_decay))
+```
+
+## Decay-weighted SWI exposure
+
+```{r map-decay}
+mapview(swi_unused,
+        col.regions = "grey60",
+        color       = "grey60",
+        cex         = 3,
+        layer.name  = "SWI points (unmatched)") +
+  mapview(connector_lines,
+          color      = "black",
+          lwd        = 1,
+          layer.name = "WS → SWI point") +
+  mapview(swi_used,
+          zcol        = "Case_C",
+          col.regions = pal,
+          color       = NA,
+          cex         = 5,
+          pch         = 18,
+          layer.name  = "SWI points (matched)",
+          popup       = leafpop::popupTable(
+            sf::st_drop_geometry(swi_used) %>%
+              select(watershed_id, Case_C)
+          )) +
+  mapview(ws_decay_exposed,
+          zcol        = "norm_swi_decay",
+          col.regions = pal,
+          layer.name  = "SWI Exposure — decay weight (norm)",
+          popup       = leafpop::popupTable(
+            sf::st_drop_geometry(ws_decay_exposed) %>%
+              select(wsd_source_id, park_name,
+                     raw_swi_decay, norm_swi_decay, rank_swi_decay)
+          )) +
+  mapview(ws_distant,
+          col.regions = "grey60",
+          color       = "grey60",
+          layer.name  = ">50 km from SWI point",
+          popup       = leafpop::popupTable(
+            sf::st_drop_geometry(ws_distant) %>%
+              select(wsd_source_id, park_name)
+          ))
+```
+
+## Rank comparison: division vs. decay
+
+Points on the diagonal have identical ranks under both methods. Points above
+the line rank higher (higher vulnerability) under decay weighting; points below
+rank lower.
+
+```{r rank-comparison}
+rank_comparison <- ws_exposed %>%
+  sf::st_drop_geometry() %>%
+  select(wsd_source_id, park_name, rank_swi_migration) %>%
+  left_join(
+    decay_results %>% select(wsd_source_id, rank_swi_decay),
+    by = "wsd_source_id"
+  ) %>%
+  left_join(
+    range_df %>% select(wsd_source_id, case_c_raw),
+    by = "wsd_source_id"
+  )
+
+ggplot(rank_comparison, aes(x = rank_swi_migration, y = rank_swi_decay,
+                             color = case_c_raw)) +
+  geom_abline(slope = 1, intercept = 0, color = "grey60", linetype = "dashed") +
+  geom_point(alpha = 0.7) +
+  scale_color_gradient2(low = "blue", mid = "grey80", high = "red",
+                        midpoint = 0, name = "Case_C (m)") +
+  labs(
+    x = "Rank — division weighting (current)",
+    y = "Rank — decay weighting"
+  ) +
+  theme_minimal()
+```

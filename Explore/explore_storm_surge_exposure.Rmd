@@ -1,0 +1,477 @@
+---
+title: "Storm Surge Exposure Exploration"
+author: "NPS Water Vulnerability"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    code_folding: hide
+editor_options:
+  markdown:
+    wrap: 80
+---
+
+The purpose of this notebook is to explore the results from the storm surge
+exposure analysis. For each of 4 CMIP6 models we compute the change in 100-year
+return period storm surge level (future 2021-2050 minus historical 1985-2014).
+Each NPS water supply is assigned the worst-case model surge change from its
+nearest coastal station, divided by distance to coast. Water supplies whose
+nearest surge station is more than 50 km away receive NA.
+
+Data are generated in `rapid_workflow.Rmd` using `calc_storm_surge_exposure()`.
+Raw surge stations are preprocessed by `process_storm_surge_data()`.
+
+# Interpretation
+
+Two complementary metrics are computed for each water supply:
+
+`raw_surge_change_max` is the absolute change in the 100-year return period
+(RP100) surge height (in meters) at the nearest coastal model node, computed as
+future (2021–2050) minus historical (1985–2014) under SSP5-8.5, divided by
+`coast_dist_m` (distance to coast in meters).
+
+`raw_surge_pct_change_max` is the same change expressed as a percentage of the
+historical RP100 surge level — `(future - historical) / historical * 100` —
+also divided by `coast_dist_m`. This metric normalizes by baseline surge
+magnitude, making it more comparable across locations with different historical
+surge levels.
+
+Both metrics weight exposure by coastal proximity: the same surge change matters
+more for a supply close to the coast than one near the 50 km boundary. In
+practice, the distance weighting dominates the final rankings because the range
+of variation in `coast_dist_m` far exceeds the range of variation in surge
+change. A supply 50 m from the coast gets a divisor of 50 (multiplier ~0.02);
+one at 5,000 m gets a divisor of 5,000 (multiplier ~0.0002) — a 100x difference
+in weight from distance alone. Absolute surge changes across all CONUS stations
+typically vary by only 5–10x. Distance variation therefore swamps surge
+variation, and the final ordering is determined almost entirely by coastal
+proximity rather than projected surge change magnitude. An alternative weighting
+approach — a 0-to-1 decay function that approaches 0 as distance approaches
+50 km — bounds the weight range to roughly 5x, which would allow surge magnitude
+to play a larger role in rankings.
+
+The worst-case value across the 4 CMIP6 models is retained for each station, so
+both metrics reflect the most adverse projected outcome rather than a model mean.
+
+The metrics capture only the *change in surge dynamics* driven by altered storm
+climatology; they do not include mean sea level rise, which is addressed
+separately by the sea level rise inundation indicator.
+
+Water supplies more than 50 km from the nearest coastal surge station receive
+`NA` — they are considered outside the domain of meaningful coastal surge
+exposure regardless of surge magnitude at the nearest station.
+
+# Data source
+
+Source: Muis et al. (2023), distributed through the Copernicus Climate Data
+Store (CDS), dataset `storm_surge_muis_2023/` (local path).
+
+## What was downloaded
+
+| Field | Value | What it means |
+|---|---|---|
+| **Model** | CMCC-CM2-VHR4, EC-Earth3P-HR, HadGEM3-GC31-HM, HadGEM3-GC31-HM-SST | High-resolution HighResMIP models — chosen because coarse models underestimate tropical cyclone-driven surges |
+| **Period** | 1985–2014 (historical), 2021–2050 (future) | Historical baseline vs. near-future projection window |
+| **Variable** | Surge level | Meteorological surge component in meters — not total water level, not SLR |
+| **Statistic** | 100-year return period (RP100), best-fit bound | Upper-tail surge height representative of a 1-in-100-year event over each 30-year period |
+| **Experiment** | Historical, Future | Historical = ERA5-forced run; Future = SSP5-8.5 forced run |
+| **Derived variable** | Absolute value | Actual surge height in meters — not already a change value; the change is computed in `process_storm_surge_data()` |
+
+## What we are trying to calculate: 
+
+How much storm surge is projected to change at 
+a given water supply. We are not considering tides and mean sea level rise as a 
+part of this analysis. 
+
+## How we are calculating this risk: 
+
+The Global Tide and Surge Model v3.0 (GTSM) is 
+a 2D hydrodynamic model. For each climate model run, hourly wind speed and surface
+pressure fields are used to force GTSM, which sumulates the resulting surge height
+at ~43,000 coastal stations globally (roughly one every ~5-10km along coastlines).
+
+Over each 30-year period GTSM produces a time series of hourly surge heights at
+each coastal station. The 100-year return period (RP100) is the surge height
+expected to be exceeded on average once every 100 years — an extreme but
+plausible event.
+
+For each of the 4 models, `process_storm_surge_data()` computes:
+
+```
+surge_change = future_rp100 (2021–2050) − historical_rp100 (1985–2014)
+```
+
+The worst-case value across the 4 models is retained per station. 
+`calc_storm_surge_exposure()` then assigns each water supply the surge change 
+from its nearest station, with a 50 km distance cutoff.
+
+# Establish environment
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r}
+source("setup.R")
+mapviewOptions(fgb = FALSE)
+```
+
+# Load data
+
+## Water supplies
+
+```{r}
+water_supplies <- get_wsd(rapid = TRUE)
+```
+
+## Storm surge stations (preprocessed CONUS subset)
+
+```{r}
+storm_surge_stations <- sf::st_read(
+  here("data", "rapid", "inputs", "storm_surge", "storm_surge_exposure_conus.gpkg"),
+  quiet = TRUE
+)
+```
+
+## Storm surge exposure results
+
+Check for a saved CSV first; fall back to running the calc function if none exists.
+
+```{r}
+exp_files <- list.files(
+  here("data", "rapid", "outputs"),
+  pattern    = "^storm_surge_exposure_.*\\.csv$",
+  full.names = TRUE
+)
+
+if (length(exp_files) > 0) {
+  storm_surge_exp <- read_csv(exp_files[length(exp_files)], show_col_types = FALSE)
+} else {
+  storm_surge_exp <- calc_storm_surge_exposure(
+    water_supplies       = water_supplies,
+    storm_surge_stations = here("data", "rapid", "inputs", "storm_surge",
+                                "storm_surge_exposure_conus.gpkg"),
+    save       = TRUE,
+    output_dir = here("data", "rapid", "outputs"),
+    verbose    = TRUE
+  )
+}
+```
+
+## Join results to water supply geometries
+
+```{r}
+ws_mapped <- water_supplies %>%
+  inner_join(
+    storm_surge_exp %>% select(-park_unit, -park_name),
+    by = "wsd_source_id"
+  )
+```
+
+# Maps
+
+## Water supplies and nearest surge station connections (absolute change)
+
+Water supply points are colored by normalized absolute surge change. Each
+coastal water supply is connected by a line to the surge station used to assign
+its value. Surge stations are colored by `max_surge_change_m` — stations matched
+to at least one water supply are shown; unmatched stations are grey. Water
+supplies more than 50 km from the nearest surge station are grey.
+
+```{r}
+pal <- colorRampPalette(c("green", "yellow", "red"))
+
+ws_exposed <- ws_mapped %>% filter(!is.na(raw_surge_change_max))
+ws_distant <- ws_mapped %>% filter(is.na(raw_surge_change_max))
+
+# Project for nearest-neighbor geometry, then build connector lines
+ws_exposed_proj      <- st_transform(ws_exposed, 5070)
+stations_proj_albers <- st_transform(storm_surge_stations, 5070)
+
+nearest_idx     <- st_nearest_feature(ws_exposed_proj, stations_proj_albers)
+used_idx        <- unique(nearest_idx)
+stations_used   <- stations_proj_albers[used_idx, ]   %>% st_transform(4326)
+stations_unused <- stations_proj_albers[-used_idx, ]  %>% st_transform(4326)
+
+connector_lines <- st_nearest_points(
+  ws_exposed_proj,
+  stations_proj_albers[nearest_idx, ],
+  pairwise = TRUE
+) %>%
+  st_as_sf() %>%
+  st_transform(4326)
+
+mapview(stations_unused,
+        col.regions = "grey60",
+        color       = "grey60",
+        cex         = 3,
+        layer.name  = "Surge stations (unmatched)") +
+  mapview(connector_lines,
+          color      = "black",
+          lwd        = 1,
+          layer.name = "WS → surge station") +
+  mapview(stations_used,
+          zcol        = "max_surge_change_m",
+          col.regions = pal,
+          color       = NA,
+          cex         = 5,
+          pch         = 18,
+          layer.name  = "Surge stations (matched)",
+          popup       = leafpop::popupTable(
+            sf::st_drop_geometry(stations_used) %>%
+              select(lon, lat, max_surge_change_m, max_surge_pct_change, max_surge_model)
+          )) +
+  mapview(ws_exposed,
+          zcol        = "norm_surge_change_max",
+          col.regions = pal,
+          layer.name  = "Storm Surge Change (norm)",
+          popup       = leafpop::popupTable(
+            sf::st_drop_geometry(ws_exposed) %>%
+              select(wsd_source_id, park_name,
+                     raw_surge_change_max,
+                     norm_surge_change_max,
+                     rank_surge_change_max)
+          )) +
+  mapview(ws_distant,
+          col.regions = "grey60",
+          color       = "grey60",
+          layer.name  = ">50 km from surge station",
+          popup       = leafpop::popupTable(
+            sf::st_drop_geometry(ws_distant) %>%
+              select(wsd_source_id, park_name,
+                     raw_surge_change_max,
+                     norm_surge_change_max,
+                     rank_surge_change_max)
+          ))
+```
+
+## Water supplies and nearest surge station connections (percent change)
+
+Same station assignments as above, now colored by normalized percent surge
+change. Connector lines, matched stations, and unmatched stations are identical
+to the absolute change map — only the water supply color scale differs.
+
+```{r}
+ws_exposed_pct <- ws_mapped %>% filter(!is.na(raw_surge_pct_change_max))
+
+mapview(stations_unused,
+        col.regions = "grey60",
+        color       = "grey60",
+        cex         = 3,
+        layer.name  = "Surge stations (unmatched)") +
+  mapview(connector_lines,
+          color      = "black",
+          lwd        = 1,
+          layer.name = "WS → surge station") +
+  mapview(stations_used,
+          zcol        = "max_surge_pct_change",
+          col.regions = pal,
+          color       = NA,
+          cex         = 5,
+          pch         = 18,
+          layer.name  = "Surge stations (matched)",
+          popup       = leafpop::popupTable(
+            sf::st_drop_geometry(stations_used) %>%
+              select(lon, lat, max_surge_change_m, max_surge_pct_change, max_surge_model)
+          )) +
+  mapview(ws_exposed_pct,
+          zcol        = "norm_surge_pct_change_max",
+          col.regions = pal,
+          layer.name  = "Storm Surge % Change (norm)",
+          popup       = leafpop::popupTable(
+            sf::st_drop_geometry(ws_exposed_pct) %>%
+              select(wsd_source_id, park_name,
+                     raw_surge_pct_change_max,
+                     norm_surge_pct_change_max,
+                     rank_surge_pct_change_max)
+          )) +
+  mapview(ws_distant,
+          col.regions = "grey60",
+          color       = "grey60",
+          layer.name  = ">50 km from surge station",
+          popup       = leafpop::popupTable(
+            sf::st_drop_geometry(ws_distant) %>%
+              select(wsd_source_id, park_name,
+                     raw_surge_pct_change_max,
+                     norm_surge_pct_change_max,
+                     rank_surge_pct_change_max)
+          ))
+```
+
+# Decay function weighting (alternative)
+
+Instead of dividing by `coast_dist_m`, this approach multiplies the raw surge
+value by a linear decay weight: `1 - (coast_dist_m / 50000)`. The weight is 1.0
+at the shoreline and 0.0 at the 50 km cutoff, so the weight range is bounded to
+0–1 (~5x variation). Because surge changes across CONUS stations vary by
+5–10x, the two sources of variation are now comparable — surge magnitude plays a
+meaningful role in rankings alongside coastal proximity.
+
+## Build decay-weighted results
+
+```{r}
+coast_dist_df <- read_csv(
+  here("data", "rapid", "inputs", "coast_comp", "coast_distances.csv"),
+  show_col_types = FALSE
+)
+
+# nearest_idx and stations_proj_albers already built in the first map chunk
+decay_results <- ws_exposed %>%
+  sf::st_drop_geometry() %>%
+  select(wsd_source_id, park_unit, park_name) %>%
+  mutate(
+    surge_change_raw     = stations_proj_albers$max_surge_change_m[nearest_idx],
+    surge_pct_change_raw = stations_proj_albers$max_surge_pct_change[nearest_idx]
+  ) %>%
+  left_join(coast_dist_df, by = c("wsd_source_id", "park_unit", "park_name")) %>%
+  mutate(
+    decay_weight                  = pmax(0, 1 - (coast_dist_m / 50000)),
+    raw_surge_change_decay        = surge_change_raw     * decay_weight,
+    raw_surge_pct_change_decay    = surge_pct_change_raw * decay_weight
+  ) %>%
+  select(wsd_source_id, park_unit, park_name,
+         raw_surge_change_decay, raw_surge_pct_change_decay) %>%
+  add_standardized_indicators("raw_surge_change_decay",     invert = FALSE) %>%
+  add_standardized_indicators("raw_surge_pct_change_decay", invert = FALSE)
+
+ws_decay <- water_supplies %>%
+  left_join(decay_results, by = c("wsd_source_id", "park_unit", "park_name"))
+
+ws_decay_exposed <- ws_decay %>% filter(!is.na(raw_surge_change_decay))
+```
+
+## Decay-weighted absolute surge change
+
+```{r}
+mapview(stations_unused,
+        col.regions = "grey60",
+        color       = "grey60",
+        cex         = 3,
+        layer.name  = "Surge stations (unmatched)") +
+  mapview(connector_lines,
+          color      = "black",
+          lwd        = 1,
+          layer.name = "WS → surge station") +
+  mapview(stations_used,
+          zcol        = "max_surge_change_m",
+          col.regions = pal,
+          color       = NA,
+          cex         = 5,
+          pch         = 18,
+          layer.name  = "Surge stations (matched)",
+          popup       = leafpop::popupTable(
+            sf::st_drop_geometry(stations_used) %>%
+              select(lon, lat, max_surge_change_m, max_surge_pct_change, max_surge_model)
+          )) +
+  mapview(ws_decay_exposed,
+          zcol        = "norm_surge_change_decay",
+          col.regions = pal,
+          layer.name  = "Surge Change — decay weight (norm)",
+          popup       = leafpop::popupTable(
+            sf::st_drop_geometry(ws_decay_exposed) %>%
+              select(wsd_source_id, park_name,
+                     raw_surge_change_decay,
+                     norm_surge_change_decay,
+                     rank_surge_change_decay)
+          )) +
+  mapview(ws_distant,
+          col.regions = "grey60",
+          color       = "grey60",
+          layer.name  = ">50 km from surge station",
+          popup       = leafpop::popupTable(
+            sf::st_drop_geometry(ws_distant) %>%
+              select(wsd_source_id, park_name)
+          ))
+```
+
+## Decay-weighted percent surge change
+
+```{r}
+mapview(stations_unused,
+        col.regions = "grey60",
+        color       = "grey60",
+        cex         = 3,
+        layer.name  = "Surge stations (unmatched)") +
+  mapview(connector_lines,
+          color      = "black",
+          lwd        = 1,
+          layer.name = "WS → surge station") +
+  mapview(stations_used,
+          zcol        = "max_surge_pct_change",
+          col.regions = pal,
+          color       = NA,
+          cex         = 5,
+          pch         = 18,
+          layer.name  = "Surge stations (matched)",
+          popup       = leafpop::popupTable(
+            sf::st_drop_geometry(stations_used) %>%
+              select(lon, lat, max_surge_change_m, max_surge_pct_change, max_surge_model)
+          )) +
+  mapview(ws_decay_exposed,
+          zcol        = "norm_surge_pct_change_decay",
+          col.regions = pal,
+          layer.name  = "Surge % Change — decay weight (norm)",
+          popup       = leafpop::popupTable(
+            sf::st_drop_geometry(ws_decay_exposed) %>%
+              select(wsd_source_id, park_name,
+                     raw_surge_pct_change_decay,
+                     norm_surge_pct_change_decay,
+                     rank_surge_pct_change_decay)
+          )) +
+  mapview(ws_distant,
+          col.regions = "grey60",
+          color       = "grey60",
+          layer.name  = ">50 km from surge station",
+          popup       = leafpop::popupTable(
+            sf::st_drop_geometry(ws_distant) %>%
+              select(wsd_source_id, park_name)
+          ))
+```
+
+## Rank comparison: division vs. decay
+
+Points on the diagonal have identical ranks under both methods. Points above
+the line rank higher under decay weighting; points below rank lower. Color
+shows the unweighted station value (raw surge change or percent change) —
+this reveals whether rank shifts are driven by high-surge or low-surge stations.
+
+```{r rank-comparison}
+rank_comparison <- ws_exposed %>%
+  sf::st_drop_geometry() %>%
+  select(wsd_source_id, park_name,
+         rank_surge_change_max, rank_surge_pct_change_max) %>%
+  left_join(
+    decay_results %>% select(wsd_source_id,
+                              rank_surge_change_decay,
+                              rank_surge_pct_change_decay),
+    by = "wsd_source_id"
+  ) %>%
+  mutate(
+    station_surge_change_m   = stations_proj_albers$max_surge_change_m[nearest_idx],
+    station_surge_pct_change = stations_proj_albers$max_surge_pct_change[nearest_idx]
+  )
+
+p_abs <- ggplot(rank_comparison,
+                aes(x = rank_surge_change_max, y = rank_surge_change_decay,
+                    color = station_surge_change_m)) +
+  geom_abline(slope = 1, intercept = 0, color = "grey60", linetype = "dashed") +
+  geom_point(alpha = 0.7) +
+  scale_color_gradient(low = "grey80", high = "red", name = "Surge\nchange (m)") +
+  labs(x = "Rank — division (current)", y = "Rank — decay",
+       title = "Absolute surge change") +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+p_pct <- ggplot(rank_comparison,
+                aes(x = rank_surge_pct_change_max, y = rank_surge_pct_change_decay,
+                    color = station_surge_pct_change)) +
+  geom_abline(slope = 1, intercept = 0, color = "grey60", linetype = "dashed") +
+  geom_point(alpha = 0.7) +
+  scale_color_gradient(low = "grey80", high = "red", name = "Surge\n% change") +
+  labs(x = "Rank — division (current)", y = "Rank — decay",
+       title = "Percent surge change") +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+p_abs + p_pct
+```
