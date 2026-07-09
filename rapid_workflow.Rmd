@@ -203,7 +203,7 @@ Worst-case CMIP6 model change in 100-year return period storm surge level (futur
 storm_surge_exp <- calc_storm_surge_exposure(
   water_supplies        = water_supplies,
   storm_surge_stations  = here("data", "rapid", "inputs", "storm_surge",
-                                "storm_surge_exposure_conus.gpkg"),
+                               "storm_surge_exposure_conus.gpkg"),
   coast_distances       = here("data", "rapid", "inputs", "coast_comp", "coast_distances.csv"),
   save       = TRUE,
   output_dir = here("data", "rapid", "outputs"),
@@ -253,6 +253,18 @@ swi_exp <- calc_swi_exposure(
   verbose         = TRUE
 )
 ```
+
+## Nearby Use/Competition
+
+Data currently from USFS compilation of all USGS data use data by county:
+```{r}
+nearby_use_exposure <- calc_nearby_use_exposure(water_supplies,
+                                                     observed_use = fread("data/all/RPAWaterDemand/1_BaseData/Trash 2022/usgswithdrawals.csv"),
+                                                     future_use = fread("data/all/RPAWaterDemand/2_Demand_Results/cons_and_withdrawal.csv"),
+                                                     save = TRUE,
+                                                     output_dir = "data/rapid/outputs/")
+```
+
 
 # Sensitivity
 
@@ -341,7 +353,7 @@ swe_sen <- calc_swe_sensitivity(water_supplies,
 ```
 
 
-## Water Withdrawal Competition
+## Nearby Use/Competition
 
 Data currently from USFS compilation of all USGS data use data by county:
 
