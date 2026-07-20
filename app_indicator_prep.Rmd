@@ -1,5 +1,5 @@
 ---
-title: "NPS Water Supply Vulnerability Index Calculation"
+title: "Indicator Prep for WSVA Tool (Rapid App)"
 author: "Caitlin Mothes"
 date: "`r Sys.Date()`"
 output:
@@ -18,7 +18,7 @@ source('setup.R')
 
 # Overview
 
-This workflow calculates a **Total Vulnerability Index** for each NPS water supply system following the hierarchical Euclidean distance framework from [Michalak et al. (2021)](https://irma.nps.gov/DataStore/Reference/Profile/2287636).
+The index workflow calculates a **Total Vulnerability Index** for each NPS water supply system following the hierarchical Euclidean distance framework from [Michalak et al. (2021)](https://irma.nps.gov/DataStore/Reference/Profile/2287636).
 
 **Calculation steps at every level:**
 
@@ -42,7 +42,7 @@ This workflow calculates a **Total Vulnerability Index** for each NPS water supp
 | Exposure | Sea Level Rise | Inundation from sea level rise | \% area inundated under projected sea level rise |  | calc_inundation_exposure.R |
 | Exposure | Sea Level Rise | Inundation from storm surge \* distance to coast weight |  |  |  |
 | Exposure | Sea Level Rise | Projected saltwater intrusion \* distance to coast weight |  |  |  |
-| Exposure | Wildfire | Change in likelihood of wildfire | \% change in probability of wildfire occurrence |  | calc_fire_exposure.R |
+| Exposure | Wildfire | Change in likelihood of wildfire \* % models predicting decrease in precipitation | \% change in probability of wildfire occurrence |  | calc_fire_exposure.R |
 | Exposure | Demand | Change in nearby water use |  |  |  |
 | Exposure | Demand | S-D AUC (runoff/precip timing + projected visitation) |  |  |  |
 | Sensitivity | Demand | Historic visitation trend | Long-term trend in annual park visitation |  | calc_visitation_sensitivity.R |
@@ -205,6 +205,7 @@ indicators_clean <- data %>%
     # Fire
     #exp_fire_prob_change = norm_fire_prob_change_p90,
     exp_fire_prob_change = raw_fire_prob_change_p90,
+    exp_fire_model_agree = raw_fire_models_showing_increase,
     
     # Drought - negative change in SPEI means conditions are getting drier (bigger water deficit)
     exp_drought_change = raw_spei_change_p10,
