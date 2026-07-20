@@ -387,7 +387,20 @@ visitation_sen <- calc_visitation_sensitivity(water_supplies,
          norm_avg_visitation, norm_scaled_trend_visitation)
 ```
 
-------------------------------------------------------------------------
+## Groundwater Depth
+
+Modeled water table depth (WTD) from the CONUS-wide RF WTD model (Zenodo 18504963),
+applied only to groundwater-sourced water supplies.
+
+```{r}
+groundwater_depth_sen <- calc_groundwater_depth_sensitivity(
+  water_supplies   = water_supplies,
+  groundwater_data = "data/rapid/inputs/groundwater_depth/wtd_all_sites.csv",
+  save             = TRUE,
+  output_dir       = "data/rapid/outputs/",
+  verbose          = TRUE
+)
+```
 
 # Testing
 

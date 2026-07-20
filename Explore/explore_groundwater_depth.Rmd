@@ -1,0 +1,805 @@
+---
+title: "Groundwater Depth Indicator — Exploratory Analysis"
+subtitle: "Comparing WSD Well Depth to Modeled Water Table Depth for Groundwater Sources"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    theme: flatly
+    highlight: tango
+    toc: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+    toc_depth: 3
+    number_sections: true
+    fig_width: 10
+    fig_height: 6
+    code_folding: show
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+This exploratory notebook builds on KEC's original exploration of the groundwater
+depth dataset published in Ma et al. (2026) (see `Explore_GW_Depths.Rmd`).
+
+This notebook explains some of the decisions behind `process_groundwater_depth.R` and
+`calc_groundwater_depth_sensitivity.R`, and validates them against the WSD's own
+recorded data. A high-level summary of the paper's methods is included below.
+
+The groundwater depth sensitivity indicator only applies to groundwater-sourced
+water supplies. `well_depth`, recorded in the WSD but sparse, is treated as
+ground truth and used as the primary depth-to-water estimate, assuming a 10 ft
+well screen (`well_depth - 10 ft`, clipped at 0). Where `well_depth` is missing,
+the indicator falls back to modeled water table depth (WTD) from
+`process_groundwater_depth()`. Both sources are then binned into a
+DRASTIC-style sensitivity score (`raw_groundwater_depth_bin`). The
+`# Other Explorations` section at the end compares this blended approach
+against a WTD-only version of the same bins, to see how much the `well_depth`
+substitution actually changes results.
+
+# Overview of the paper's methods
+
+- CONUS-wide 1 arc-second (~30m) random forest model, trained on over 1M well
+  observations (1914–2023) from USGS, Fan et al., and Jasechko et al.; 10
+  physically-motivated input variables (climate, hydraulic conductivity,
+  elevation/slope, distance to streams, soil texture) — no x/y coordinates
+- 300 decision trees, median of tree outputs is the WTD estimate; held-out test
+  performance: r = 0.79, RMSE = 14.94m, NSE = 0.62 (all-observed-cells: r = 0.96,
+  RMSE = 6.72m, NSE = 0.93)
+- Elevation is by far the dominant predictor (99.55% permutation importance),
+  followed by annual mean temperature (94.63%) and precipitation (52.72%)
+- Uncertainty is available from the model (interquartile range of the 300 trees'
+  outputs per cell), but isn't in the Zenodo raster we're using — see "Things to
+  add later" below
+- Regional accuracy varies widely: 18 HUC2 basins ranged r = 0.51–0.88, RMSE =
+  6.25–28.55m — a single WTD value's reliability depends a lot on where the site is
+  relative to the training data. 
+
+Things to add later:
+
+- Pull in the model's uncertainty layer (`wtd_uncertainty`, interquartile range of
+  the 300 RF trees' outputs per cell). It's not in the Zenodo download we're
+  using — that's point-estimate only — but it's available as a separate
+  variable on the same grid via Princeton/HydroFrame's `hf_hydrodata` platform:
+  https://hf-hydrodata.readthedocs.io/en/latest/gen_ma_2025.html
+
+# Setup
+
+```{r libraries, include = FALSE}
+source("setup.R")
+```
+
+# Establish file paths
+
+```{r file_paths}
+wtd_raster_path <- here("data", "all", "groundwater_sensitivity",
+                        "wtd_mean_estimate_RF_additional_inputs_dummy_drop0LP_1s_CONUS2_m_v_20240813.tif")
+
+wtd_all_sites_path <- here("data", "rapid", "inputs", "groundwater_depth",
+                           "wtd_all_sites.csv")
+
+gw_sensitivity_files <- list.files(here("data", "rapid", "outputs"),
+                                   pattern = "^groundwater_depth_sensitivity_.*\\.csv$",
+                                   full.names = TRUE)
+
+gw_sensitivity_path <- gw_sensitivity_files[length(gw_sensitivity_files)]
+```
+
+# Import Data
+
+## Water Supply Database — Groundwater Sources
+
+Load the WSD and filter to groundwater source types only. `well_depth` is the field we want
+to prioritize when present.
+
+```{r load_wsd}
+wsd <- get_wsd(rapid = TRUE) 
+
+wsd_gw <- wsd %>%
+  dplyr::filter(
+    grepl("groundwater", source_type)
+  ) %>%
+  dplyr::mutate(
+    well_depth = as.numeric(well_depth),
+    well_depth_m = well_depth * 0.3048,
+    # Assume a 10 ft well screen, so the water table sits ~10 ft above the
+    # bottom of the well; clip at 0 for wells shallower than 10 ft.
+    well_depth_screen_m = pmax(0, (well_depth - 10) * 0.3048)
+  ) %>%
+  dplyr::select(wsd_source_id, park_unit, park_name, source_type, well_depth,
+                well_depth_m, well_depth_screen_m, description, gwudi, source_notes)
+```
+
+Out of the Water Systems Database's `r nrow(wsd)` potential systems,
+`r nrow(wsd_gw)` are confirmed groundwater systems and of those
+`r sum(!is.na(wsd_gw$well_depth))` have well depth available.
+
+## Water Supplies' Modeled Water Table Depth
+
+These are the results from running `process_groundwater_depth()` in 
+`rapid_data_processing.Rmd`.
+
+`process_groundwater_depth()` extracts modeled water table depth (WTD) at each
+water supply point from the CONUS-wide random forest WTD model
+(https://ngwa.onlinelibrary.wiley.com/doi/10.1111/gwat.13362). For those points
+that do not overlap with the raster dataset and therefore are NA we assign them
+the closest available value within a 50km buffer. If there are no data available
+within 50km they are assigned NA. At this point there is no source or system 
+type filtering. 
+
+```{r load_wtd}
+wtd_all_sites <- read_csv(wtd_all_sites_path, show_col_types = FALSE)
+```
+
+Out of the Water Systems Database's `r nrow(wsd)` potential systems,
+`r sum(!is.na(wtd_all_sites$wtd_point_m))` overlap with the WTD dataset or are within 50km of an
+available modeled WTD estimate. `r sum(is.na(wtd_all_sites$wtd_point_m))` water
+sources are not within 50km of a modeled WTD estimate.
+
+## Groundwater Depth Sensitivity Indicator
+
+These are the results from running `calc_groundwater_depth_sensitivity()` in
+`rapid_workflow.Rmd`.
+
+`calc_groundwater_depth_sensitivity()` treats the WSD's recorded `well_depth`
+as ground truth and uses it as the primary depth-to-water estimate, assuming a
+10 ft well screen (i.e. the water table sits ~10 ft above the bottom of the
+well: `well_depth_ft - 10`, clipped to 0 for wells shallower than 10 ft).
+Where `well_depth` is missing, it falls back to the modeled water table depth
+(WTD) from `process_groundwater_depth()`. A `raw_groundwater_depth_source`
+column records which source ("well_depth" or "modeled_wtd") was used for each
+site.
+
+The raw depth is also binned into a DRASTIC-style depth-to-water sensitivity
+score, using thresholds of 1.5/4.5/9.1/15.2/22.9/30.5 m (5/15/30/50/75/100 ft)
+mapped to scores of 1/.9/.7/.5/.3/.2/.1. A shallower water table means higher
+sensitivity, so `invert = TRUE` is used when standardizing the raw (continuous)
+depth; the bin score is not inverted.
+
+```{r load_indicator}
+gw_sensitivity <- read_csv(gw_sensitivity_path, show_col_types = FALSE)
+```
+
+Out of the Water Systems Database's `r nrow(wsd)` potential systems,
+`r nrow(gw_sensitivity)` are groundwater-sourced and have a computed
+sensitivity score. Of those, `r sum(gw_sensitivity$raw_groundwater_depth_source == "well_depth")`
+used the WSD's recorded `well_depth` and `r sum(gw_sensitivity$raw_groundwater_depth_source == "modeled_wtd")`
+fell back to the modeled WTD.
+
+## Join the WSD to the processing and indicator calculation results
+
+`gw_all` includes every water supply, not just groundwater-sourced ones, so
+that non-groundwater sources show up on maps as `NA` for this indicator
+(rather than being silently dropped).
+
+```{r join_all}
+gw_all <- wsd %>%
+  dplyr::mutate(
+    well_depth = as.numeric(well_depth),
+    well_depth_m = well_depth * 0.3048,
+    # Assume a 10 ft well screen, so the water table sits ~10 ft above the
+    # bottom of the well; clip at 0 for wells shallower than 10 ft.
+    well_depth_screen_m = pmax(0, (well_depth - 10) * 0.3048)
+  ) %>%
+  dplyr::select(wsd_source_id, park_unit, park_name, source_type, well_depth,
+                well_depth_m, well_depth_screen_m, description, gwudi, source_notes) %>%
+  dplyr::left_join(
+    wtd_all_sites %>% dplyr::select(wsd_source_id, wtd_point_m),
+    by = "wsd_source_id"
+  ) %>%
+  dplyr::left_join(
+    gw_sensitivity %>% dplyr::select(-park_unit, -park_name),
+    by = "wsd_source_id"
+  )
+```
+
+# Exploration
+
+## Processing results
+
+### Maps
+
+#### Direct Raster Overlap
+
+Here is an example of a water source site that overlaps with the raster. Note that
+the replacement of the the WTD data with the well depth data does not happen 
+in the processing script. 
+
+```{r}
+site <- wsd %>%
+  filter(wsd_source_id == "AGFO_WS_002_01")
+
+wtd <- terra::rast(wtd_raster_path)
+
+site_native <- site %>%
+  sf::st_transform(terra::crs(wtd, proj = TRUE))
+
+site_buffer <- site_native %>%
+  sf::st_buffer(dist = 5000)
+
+wtd_crop <- terra::crop(wtd, terra::vect(site_buffer))
+
+mapview(wtd_crop, layer.name = "Modeled WTD (m)") +
+  mapview(site_native, col.regions = "red", layer.name = "AGFO_WS_002_01")
+```
+
+#### Filled via Nearest Valid Cell Within Buffer
+
+Here is an example of a water source the does not overlap with the raster, but
+is assigned a value based on the closest available data.
+
+```{r}
+site <- wsd %>%
+  filter(wsd_source_id == "ACAD_WS_002_01")
+
+wtd <- terra::rast(wtd_raster_path)
+
+site_native <- site %>%
+  sf::st_transform(terra::crs(wtd, proj = TRUE))
+
+site_buffer <- site_native %>%
+  sf::st_buffer(dist = 50000)
+
+wtd_crop <- terra::crop(wtd, terra::vect(site_buffer))
+
+mapview(wtd_crop, layer.name = "Modeled WTD (m)", maxBytes = 8 * 1024 * 1024) +
+  mapview(site_native, col.regions = "red", layer.name = "ACAD_WS_002_01")
+```
+
+#### No Valid Cell Found Within Buffer
+
+Based on the current data files, every groundwater-sourced water supply does
+have a WTD (or well_depth-fallback) value; the only sites lacking a modeled
+WTD are non-groundwater systems (rainwater catchments on Dry Tortugas,
+lake-fed systems on Isle Royale) that the indicator was never meant to apply
+to. These are the only sites in the full WSD (not just the groundwater
+filter) with no modeled WTD value within the 50km search buffer:
+
+```{r na_wtd_sites}
+gw_all %>%
+  sf::st_drop_geometry() %>%
+  dplyr::filter(is.na(wtd_point_m)) %>%
+  dplyr::select(wsd_source_id, park_unit, park_name, source_type)
+```
+
+#### Comparison between WSD Well Depth Column and Modeled WTD
+
+Here we display the results from the processing script to the information that is
+already in the WSD.
+
+```{r wsd_wtd_comparison}
+leafsync::sync(
+  mapview(gw_all, zcol = "well_depth_m", layer.name = "WSD Well Depth (m)"),
+  mapview(gw_all, zcol = "wtd_point_m", layer.name = "Modeled WTD (m)")
+)
+```
+
+The well depths are much deeper than the modeled WTD depths, lets look at these
+anomalies in the next section.
+
+### Figures
+
+Figures below are restricted to groundwater sources: `gw_only` (all groundwater
+sources, regardless of `well_depth` availability) and `gw_depth` (groundwater
+sources with a recorded `well_depth`), rather than the full `gw_all`.
+
+```{r gw_depth_setup}
+gw_only <- gw_all %>%
+  dplyr::filter(grepl("groundwater", source_type))
+
+gw_depth <- gw_only %>%
+  dplyr::filter(!is.na(well_depth))
+
+# Formats a p-value for scatterplot subtitles: below 0.001 is reported as
+# "< 0.001" rather than rounding down to 0.000
+fmt_p <- function(p) if (p < 0.001) "< 0.001" else sprintf("= %.3f", p)
+
+# Wraps long subtitle/title strings so they break onto multiple lines
+# instead of overflowing the plot panel (an issue for patchwork-combined
+# plots, where each panel only gets half the figure width)
+wrap_text <- function(x, width = 80) stringr::str_wrap(x, width = width)
+```
+
+#### Scatterplot of the WSD well depths and modeled WTD anomaly
+
+```{r scatter_well_vs_wtd, fig.width=6, fig.height=6}
+scatter_well_wtd_data <- gw_depth %>%
+  dplyr::filter(!is.na(wtd_point_m))
+
+cor_well_wtd <- cor.test(scatter_well_wtd_data$wtd_point_m, scatter_well_wtd_data$well_depth_m)
+
+scatter_well_wtd_data %>%
+  ggplot(aes(x = wtd_point_m, y = well_depth_m, color = source_type)) +
+  geom_point(alpha = 0.5) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "red") +
+  theme_bw() +
+  theme(legend.position = "bottom") +
+  guides(color = guide_legend(title.position = "top")) +
+  labs(
+    x = "Modeled WTD (m)",
+    y = "WSD Well Depth (m)",
+    color = "Source Type",
+    title = "WSD Well Depth vs. Modeled Water Table Depth",
+    subtitle = wrap_text(sprintf(
+      "Dashed line = 1:1 agreement; points above the line are wells deeper than the modeled water table. n = %d, Pearson r = %.2f (p %s)",
+      nrow(scatter_well_wtd_data), cor_well_wtd$estimate, fmt_p(cor_well_wtd$p.value)
+    ), width = 45)
+  )
+```
+
+#### Distribution of WSD well depth and modeled WTD anomaly
+
+Here we compare well depth to modeled water table depth where both a recorded
+well depth and a modeled WTD are available. We compute `well_depth_m - wtd_point_m`
+to get a sense of how well the WSD well depth column and the WTD data agree.
+
+A negative gap means the well depth is shallower than the modeled water table,
+so the well would not reach the water table if the model were true. These are
+sites that indicate that the model is wrong, since we would assume that the well
+depths in the WSD are accurate and effective.
+
+A gap smaller than 10m (in either direction) is treated as agreement rather
+than a real anomaly — the well and modeled WTD are close enough that the
+mismatch is likely measurement/model noise. Only wells more than 10m shallower
+than the modeled WTD are flagged as anomalies.
+
+```{r compare_setup}
+gap_tolerance_m <- 10
+
+gw_compare <- gw_depth %>%
+  dplyr::filter(!is.na(well_depth_m), !is.na(wtd_point_m)) %>%
+  dplyr::mutate(
+    depth_diff_m = well_depth_m - wtd_point_m,
+    depth_diff_flag = dplyr::if_else(
+      depth_diff_m < -gap_tolerance_m,
+      "Anomaly (well >10m shallower than WTD)",
+      "Good (within 10m or well deeper)"
+    )
+  )
+```
+
+```{r compare_hist, fig.height=10}
+n_anomaly <- sum(gw_compare$depth_diff_flag == "Anomaly (well >10m shallower than WTD)")
+mean_diff <- mean(gw_compare$depth_diff_m)
+median_diff <- median(gw_compare$depth_diff_m)
+
+ggplot(gw_compare, aes(x = depth_diff_m, fill = depth_diff_flag)) +
+  geom_histogram(bins = 30, color = "white") +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black") +
+  geom_vline(xintercept = mean_diff, linetype = "dotted", color = "blue") +
+  geom_vline(xintercept = median_diff, linetype = "dotted", color = "purple") +
+  scale_fill_manual(values = c(
+    "Good (within 10m or well deeper)" = "forestgreen",
+    "Anomaly (well >10m shallower than WTD)" = "red"
+  )) +
+  theme_bw() +
+  theme(legend.position = "bottom") +
+  guides(fill = guide_legend(title.position = "top")) +
+  labs(
+    x = "Well Depth − Modeled WTD (m)",
+    y = "Count",
+    fill = "Agreement",
+    title = "Gap Between WSD Well Depth and Modeled Water Table Depth",
+    subtitle = wrap_text(sprintf(
+      "n = %d sites; %d (%.1f%%) anomalies (>10m shallower). Mean = %.1f m (blue), Median = %.1f m (purple)",
+      nrow(gw_compare), n_anomaly, 100 * n_anomaly / nrow(gw_compare), mean_diff, median_diff
+    ), width = 85)
+  )
+```
+
+```{r compare_map}
+m_anomaly <- gw_compare %>%
+  dplyr::filter(depth_diff_flag == "Anomaly (well >10m shallower than WTD)") %>%
+  mapview(zcol = "depth_diff_m", layer.name = "Well Depth − Modeled WTD (m)")
+
+m_anomaly@map <- m_anomaly@map %>%
+  leaflet::addControl(
+    html = "<b>Sites Where Well Depth Is >10m Shallower Than Modeled WTD</b>",
+    position = "topright"
+  )
+
+m_anomaly
+```
+
+Note: this is restricted to sites with both a recorded `well_depth` and a
+modeled `wtd_point_m` (`gw_compare`) — groundwater sites missing either value
+are excluded here.
+
+```{r compare_hist_source, fig.height=10}
+ggplot(gw_compare, aes(x = depth_diff_m, fill = source_type)) +
+  geom_histogram(bins = 30, color = "white") +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black") +
+  geom_vline(xintercept = mean_diff, linetype = "dotted", color = "blue") +
+  geom_vline(xintercept = median_diff, linetype = "dotted", color = "purple") +
+  theme_bw() +
+  theme(legend.position = "bottom") +
+  guides(fill = guide_legend(title.position = "top")) +
+  labs(
+    x = "Well Depth − Modeled WTD (m)",
+    y = "Count",
+    fill = "Source Type",
+    title = wrap_text("Gap Between WSD Well Depth and Modeled Water Table Depth, by Source Type", width = 70),
+    subtitle = wrap_text(sprintf(
+      "n = %d sites; %d (%.1f%%) anomalies (>10m shallower). Mean = %.1f m (blue), Median = %.1f m (purple)",
+      nrow(gw_compare), n_anomaly, 100 * n_anomaly / nrow(gw_compare), mean_diff, median_diff
+    ), width = 85)
+  )
+```
+
+#### Distribution of WSD well depth data, colored by source_type
+
+```{r hist_well_depth_source}
+gw_depth %>%
+  ggplot(aes(x = well_depth_m, fill = source_type)) +
+  geom_histogram(bins = 30, color = "white") +
+  theme_bw() +
+  labs(x = "WSD Well Depth (m)", y = "Count", fill = "Source Type",
+       title = "Distribution of WSD Well Depth by Source Type")
+```
+
+#### Distribution of modeled WTD, colored by source_type
+
+```{r hist_wtd_source}
+gw_only %>%
+  dplyr::filter(!is.na(wtd_point_m)) %>%
+  ggplot(aes(x = wtd_point_m, fill = source_type)) +
+  geom_histogram(binwidth = 5, color = "white") +
+  theme_bw() +
+  labs(x = "Modeled WTD (m)", y = "Count", fill = "Source Type",
+       title = "Distribution of Modeled WTD by Source Type")
+```
+
+#### Static Water Level vs. WSD Well Depth
+
+Some `description`/`source_notes` entries state an explicit static water level
+(the actual measured depth to water), separate from `well_depth` (how deep the
+well was drilled). Here we extract those values with a regex and compare them
+to `well_depth` for the same sites, to sanity-check the calc function's 10 ft
+well-screen assumption (`well_depth - 10 ft`) against real measurements.
+
+```{r static_setup}
+extract_static_ft <- function(txt) {
+  m <- str_match(str_to_lower(txt), "static water level(?: of| is| at)? ([0-9.]+) ?(?:ft|feet)")[, 2]
+  as.numeric(m)
+}
+
+gw_static <- gw_only %>%
+  dplyr::mutate(
+    static_ft = dplyr::coalesce(extract_static_ft(description), extract_static_ft(source_notes)),
+    static_m = static_ft * 0.3048
+  ) %>%
+  dplyr::filter(!is.na(static_m))
+
+gw_static_well <- gw_static %>%
+  dplyr::filter(!is.na(well_depth_m))
+
+gw_static_wtd <- gw_static %>%
+  dplyr::filter(!is.na(wtd_point_m))
+```
+
+```{r static_scatter, fig.width=6, fig.height=6}
+cor_static_well <- cor.test(gw_static_well$static_m, gw_static_well$well_depth_m)
+
+p_static_well <- gw_static_well %>%
+  ggplot(aes(x = static_m, y = well_depth_m, color = source_type)) +
+  geom_point(size = 2, alpha = 0.7) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "red") +
+  theme_bw() +
+  theme(legend.position = "bottom") +
+  guides(color = guide_legend(title.position = "top")) +
+  labs(
+    x = "Static Water Level (m)",
+    y = "WSD Well Depth (m)",
+    color = "Source Type",
+    title = "Static Water Level vs. WSD Well Depth",
+    subtitle = wrap_text(sprintf(
+      "n = %d sites with an explicit static water level in source_notes/description. Pearson r = %.2f (p %s)",
+      nrow(gw_static_well), cor_static_well$estimate, fmt_p(cor_static_well$p.value)
+    ), width = 45)
+  )
+
+p_static_well
+```
+
+```{r static_hist}
+mean_static_diff <- mean(gw_static_well$well_depth_m - gw_static_well$static_m)
+median_static_diff <- median(gw_static_well$well_depth_m - gw_static_well$static_m)
+
+screen_assumption_m <- 10 * 0.3048
+
+p_static_hist <- gw_static_well %>%
+  dplyr::mutate(diff_m = well_depth_m - static_m) %>%
+  ggplot(aes(x = diff_m, fill = source_type)) +
+  geom_histogram(bins = 15, color = "white") +
+  geom_vline(xintercept = screen_assumption_m, linetype = "solid", color = "black") +
+  geom_vline(xintercept = mean_static_diff, linetype = "dotted", color = "blue") +
+  geom_vline(xintercept = median_static_diff, linetype = "dotted", color = "purple") +
+  theme_bw() +
+  theme(legend.position = "bottom") +
+  guides(fill = guide_legend(title.position = "top")) +
+  labs(
+    x = "WSD Well Depth − Static Water Level (m)",
+    y = "Count",
+    fill = "Source Type",
+    title = "Gap Between WSD Well Depth and Static Water Level",
+    subtitle = wrap_text(sprintf(
+      "Mean = %.1f m (blue), Median = %.1f m (purple), vs. the calc function's 10 ft / %.1f m screen assumption (black)",
+      mean_static_diff, median_static_diff, screen_assumption_m
+    ), width = 45)
+  )
+
+p_static_hist
+```
+
+#### Static Water Level vs. Modeled WTD
+
+Same idea, but comparing the extracted static water level to the modeled WTD
+from `process_groundwater_depth()`, to check how well the model agrees with
+directly measured static water levels (rather than well depth, which measures
+something different — how deep the well was drilled, not where the water is).
+
+```{r static_wtd_scatter, fig.width=12, fig.height=6}
+cor_static_wtd <- cor.test(gw_static_wtd$static_m, gw_static_wtd$wtd_point_m)
+
+p_static_wtd <- gw_static_wtd %>%
+  ggplot(aes(x = static_m, y = wtd_point_m, color = source_type)) +
+  geom_point(size = 2, alpha = 0.7) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "red") +
+  theme_bw() +
+  theme(legend.position = "bottom") +
+  guides(color = guide_legend(title.position = "top")) +
+  labs(
+    x = "Static Water Level (m)",
+    y = "Modeled WTD (m)",
+    color = "Source Type",
+    title = "Static Water Level vs. Modeled WTD",
+    subtitle = wrap_text(sprintf(
+      "n = %d sites with an explicit static water level in source_notes/description. Pearson r = %.2f (p %s)",
+      nrow(gw_static_wtd), cor_static_wtd$estimate, fmt_p(cor_static_wtd$p.value)
+    ), width = 45)
+  )
+
+p_static_well + p_static_wtd
+```
+
+```{r static_wtd_hist, fig.width=12, fig.height=6}
+mean_static_wtd_diff <- mean(gw_static_wtd$wtd_point_m - gw_static_wtd$static_m)
+median_static_wtd_diff <- median(gw_static_wtd$wtd_point_m - gw_static_wtd$static_m)
+
+p_static_wtd_hist <- gw_static_wtd %>%
+  dplyr::mutate(diff_m = wtd_point_m - static_m) %>%
+  ggplot(aes(x = diff_m, fill = source_type)) +
+  geom_histogram(bins = 15, color = "white") +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black") +
+  geom_vline(xintercept = mean_static_wtd_diff, linetype = "dotted", color = "blue") +
+  geom_vline(xintercept = median_static_wtd_diff, linetype = "dotted", color = "purple") +
+  theme_bw() +
+  theme(legend.position = "bottom") +
+  guides(fill = guide_legend(title.position = "top")) +
+  labs(
+    x = "Modeled WTD − Static Water Level (m)",
+    y = "Count",
+    fill = "Source Type",
+    title = "Gap Between Modeled WTD and Static Water Level",
+    subtitle = wrap_text(sprintf(
+      "n = %d sites; Mean = %.1f m (blue), Median = %.1f m (purple)",
+      nrow(gw_static_wtd), mean_static_wtd_diff, median_static_wtd_diff
+    ), width = 45)
+  )
+
+p_static_hist + p_static_wtd_hist
+```
+
+I will note here that I am not using source type column in the calculation function
+because of a lack of a clear signal between source type and WTD data. The well 
+depth data is often much deeper than the modeled WTD even with the -10ft adjustment,
+so the correlation between those two is a tough nut to crack for me. I did not 
+use the source notes because it would replace 39 rows.
+
+## Indicator Calculation Results
+
+### Maps
+
+#### Groundwater Depth Sensitivity — Standardized Bin
+
+Mapping `norm_groundwater_depth_bin`, the standardized (0-1 rescaled) version of
+the DRASTIC-style sensitivity score already computed in
+`calc_groundwater_depth_sensitivity()` (thresholds of 1.5/4.5/9.1/15.2/22.9/30.5 m
+mapped to scores of 1/.9/.7/.5/.3/.2/.1). The popup shows both the normed bin
+and `raw_groundwater_depth_m`, the actual depth value used for the indicator.
+
+```{r sensitivity_bin_map}
+m1 <- gw_all %>%
+  mapview(
+    zcol = "norm_groundwater_depth_bin",
+    layer.name = "Groundwater Depth Sensitivity (Bin)",
+    popup = leafpop::popupTable(gw_all, zcol = c("norm_groundwater_depth_bin", "raw_groundwater_depth_m"))
+  )
+
+m1
+```
+
+### Figures
+
+#### Distribution of WTD bins
+
+Count of groundwater sites in each DRASTIC-style bin score (thresholds of
+1.5/4.5/9.1/15.2/22.9/30.5 m mapped to scores of 1/.9/.7/.5/.3/.2/.1).
+
+```{r sensitivity_bin_bar}
+bin_levels <- c("0.1", "0.2", "0.3", "0.5", "0.7", "0.9", "1")
+
+p1 <- gw_only %>%
+  dplyr::filter(!is.na(raw_groundwater_depth_bin)) %>%
+  dplyr::mutate(bin_factor = factor(raw_groundwater_depth_bin, levels = bin_levels)) %>%
+  ggplot(aes(x = bin_factor, fill = bin_factor)) +
+  geom_bar(color = "white") +
+  theme_bw() +
+  theme(legend.position = "none") +
+  labs(
+    x = "Bin Score (Low Risk → High Risk)",
+    y = "Count",
+    title = wrap_text("Distribution of Groundwater Depth Sensitivity Bins", width = 45)
+  )
+
+p1
+```
+
+Distribution of `raw_groundwater_depth_m` (the actual depth value used for the
+indicator), with the DRASTIC-style bin thresholds marked as vlines, capped at
+100m to keep a small number of very deep outliers from flattening the plot.
+
+```{r sensitivity_bin_hist}
+bin_thresholds_m <- c(1.5, 4.5, 9.1, 15.2, 22.9, 30.5)
+
+gw_depth_plot <- gw_only %>%
+  dplyr::filter(!is.na(raw_groundwater_depth_m))
+
+outlier_cutoff_m <- 100
+n_outliers <- sum(gw_depth_plot$raw_groundwater_depth_m > outlier_cutoff_m)
+
+gw_depth_plot %>%
+  dplyr::filter(raw_groundwater_depth_m <= outlier_cutoff_m) %>%
+  ggplot(aes(x = raw_groundwater_depth_m, fill = factor(raw_groundwater_depth_bin, levels = bin_levels))) +
+  geom_histogram(bins = 40, color = "white") +
+  geom_vline(xintercept = bin_thresholds_m, linetype = "dashed", color = "black") +
+  theme_bw() +
+  labs(
+    x = "Groundwater Depth Used for Indicator (m)",
+    y = "Count",
+    fill = "Bin Score",
+    title = "Distribution of Groundwater Depth with DRASTIC Bin Demarcations",
+    subtitle = wrap_text(sprintf(
+      "Dashed lines = DRASTIC thresholds (1.5/4.5/9.1/15.2/22.9/30.5 m). %d outlier(s) above %d m excluded.",
+      n_outliers, outlier_cutoff_m
+    ), width = 85)
+  )
+```
+
+# Other Explorations
+
+Here I want to look at the same figures from the calculation results, but
+exclusively using WTD modeled data instead of replacing any of it with well depths.
+
+```{r wtd_only_bin_setup}
+gw_wtd_only <- gw_only %>%
+  dplyr::filter(!is.na(wtd_point_m)) %>%
+  dplyr::mutate(
+    wtd_bin = dplyr::case_when(
+      dplyr::between(wtd_point_m, 0, 1.5)     ~ 1,
+      dplyr::between(wtd_point_m, 1.5, 4.5)   ~ .9,
+      dplyr::between(wtd_point_m, 4.5, 9.1)   ~ .7,
+      dplyr::between(wtd_point_m, 9.1, 15.2)  ~ .5,
+      dplyr::between(wtd_point_m, 15.2, 22.9) ~ .3,
+      dplyr::between(wtd_point_m, 22.9, 30.5) ~ .2,
+      wtd_point_m >= 30.5                     ~ .1,
+      .default = NA
+    ),
+    wtd_bin_norm = scales::rescale(wtd_bin, to = c(0, 1))
+  )
+```
+
+## Maps
+
+#### Groundwater Depth Sensitivity — WTD Only
+
+Same DRASTIC-style bin thresholds as the calc function, applied directly to
+`wtd_point_m` for every groundwater source with a modeled WTD value, with no
+`well_depth` substitution.
+
+```{r wtd_only_bin_map}
+m2 <- gw_wtd_only %>%
+  mapview(
+    zcol = "wtd_bin_norm",
+    layer.name = "Groundwater Depth Sensitivity (WTD Only)",
+    popup = leafpop::popupTable(gw_wtd_only, zcol = c("wtd_bin_norm", "wtd_point_m"))
+  )
+
+leafsync::sync(m1, m2)
+```
+
+## Figures
+
+#### Distribution of WTD-Only Bins
+
+```{r wtd_only_bin_bar, fig.width=12, fig.height=6}
+p2 <- gw_wtd_only %>%
+  dplyr::mutate(bin_factor = factor(wtd_bin, levels = bin_levels)) %>%
+  ggplot(aes(x = bin_factor, fill = bin_factor)) +
+  geom_bar(color = "white") +
+  theme_bw() +
+  theme(legend.position = "none") +
+  labs(
+    x = "Bin Score (Low Risk → High Risk)",
+    y = "Count",
+    title = wrap_text("Distribution of Groundwater Depth Sensitivity Bins (WTD Only)", width = 45)
+  )
+
+p1 + p2
+```
+
+WTD has a greater proportion of the water supplies at risk. 
+
+```{r wtd_only_bin_hist}
+outlier_cutoff_wtd_m <- 100
+n_outliers_wtd <- sum(gw_wtd_only$wtd_point_m > outlier_cutoff_wtd_m)
+
+gw_wtd_only %>%
+  dplyr::filter(wtd_point_m <= outlier_cutoff_wtd_m) %>%
+  ggplot(aes(x = wtd_point_m, fill = factor(wtd_bin, levels = bin_levels))) +
+  geom_histogram(bins = 40, color = "white") +
+  geom_vline(xintercept = bin_thresholds_m, linetype = "dashed", color = "black") +
+  theme_bw() +
+  labs(
+    x = "Modeled WTD (m)",
+    y = "Count",
+    fill = "Bin Score",
+    title = wrap_text("Distribution of Modeled WTD with DRASTIC Bin Demarcations (WTD Only)", width = 70),
+    subtitle = wrap_text(sprintf(
+      "Dashed lines = DRASTIC thresholds (1.5/4.5/9.1/15.2/22.9/30.5 m). %d outlier(s) above %d m excluded.",
+      n_outliers_wtd, outlier_cutoff_wtd_m
+    ), width = 85)
+  )
+```
+
+#### Difference in bin distribution between the current method and the no well depth method
+
+Comparing the count of sites in each bin under the current method
+(`raw_groundwater_depth_bin`, `well_depth`-preferred with WTD fallback) against
+the WTD-only method (`wtd_bin`). Positive bars mean the WTD-only method puts
+more sites in that bin than the current method; negative bars mean fewer.
+
+```{r bin_diff_setup}
+current_counts <- gw_only %>%
+  sf::st_drop_geometry() %>%
+  dplyr::filter(!is.na(raw_groundwater_depth_bin)) %>%
+  dplyr::count(bin_factor = factor(raw_groundwater_depth_bin, levels = bin_levels), name = "n_current")
+
+wtd_only_counts <- gw_wtd_only %>%
+  sf::st_drop_geometry() %>%
+  dplyr::count(bin_factor = factor(wtd_bin, levels = bin_levels), name = "n_wtd_only")
+
+bin_diff <- dplyr::full_join(current_counts, wtd_only_counts, by = "bin_factor") %>%
+  dplyr::mutate(
+    n_current = tidyr::replace_na(n_current, 0),
+    n_wtd_only = tidyr::replace_na(n_wtd_only, 0),
+    diff = n_wtd_only - n_current
+  )
+```
+
+```{r bin_diff_bar}
+bin_diff %>%
+  ggplot(aes(x = bin_factor, y = diff, fill = diff > 0)) +
+  geom_col(color = "white") +
+  geom_hline(yintercept = 0, color = "black") +
+  scale_fill_manual(values = c("TRUE" = "red", "FALSE" = "forestgreen"), guide = "none") +
+  theme_bw() +
+  labs(
+    x = "Bin Score (Low Risk → High Risk)",
+    y = "Difference in Count (WTD Only − Current)",
+    title = wrap_text("Difference in Bin Distribution: WTD-Only vs. Current Method", width = 70),
+    subtitle = "Red = more sites in that bin under WTD-only; Green = fewer"
+  )
+```
