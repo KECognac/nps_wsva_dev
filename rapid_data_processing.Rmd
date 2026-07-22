@@ -234,11 +234,15 @@ process_swi_data(
 Filter the Muis et al. (2023) global 100-yr return period storm surge NetCDF to CONUS stations and save as a GeoPackage for use by `calc_storm_surge_exposure()`.
 
 ```{r}
-process_storm_surge_data(
-  data_dir   = here("data", "all", "coast_comp_data", "storm_surge_muis_2023/"),
-  save       = TRUE,
-  output_dir = here("data", "rapid", "inputs", "storm_surge")
-)
+# Get elevation data for coastal sites (for now, just coastal)
+process_elevation_data(water_supplies,
+                       save = TRUE,
+                       output_file = here("data", "rapid", "inputs", "water_supply_elevations.csv"),
+                       verbose = TRUE) 
+
+process_storm_surge_data(data_dir = here("data", "all", "coast_comp_data", "storm_surge_muis_2023/"),
+                         save = TRUE,
+                         output_dir = here("data", "rapid", "inputs", "storm_surge"))
 ```
 
 # Process Coastal Weights
