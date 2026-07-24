@@ -390,10 +390,11 @@ visitation_sen <- calc_visitation_sensitivity(water_supplies,
 ## Groundwater Depth
 
 Depth-to-water sensitivity for all water supplies. Groundwater/spring-sourced
-supplies get a depth from an observed static water level (extracted from WSD
-free text) where available, falling back to modeled water table depth (WTD)
-from the CONUS-wide RF WTD model (Zenodo 18504963); all other source types
-are hardcoded to a depth of 0.
+supplies get a depth from the WSD's recorded `well_depth` (assumed to sit 20%
+shallower than the well bottom, i.e. `well_depth * 0.8`) where available,
+falling back to modeled water table depth (WTD) from the CONUS-wide RF WTD
+model (Zenodo 18504963); all other (non-groundwater/spring) source types are
+hardcoded to a depth of 0.
 
 ```{r}
 groundwater_depth_sen <- calc_groundwater_depth_sensitivity(
