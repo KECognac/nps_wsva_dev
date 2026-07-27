@@ -124,7 +124,33 @@ write_csv(pyromes_selected, "data/rapid/inputs/pyromes_selected.csv")
 st_write(pyromes, "data/rapid/inputs/pyromes.gpkg", append = FALSE)
 ```
 
-# Process LOCA2 WBM Files
+# Process LOCA2 Files
+
+### Air Temperature
+
+```{r}
+temperature_data <- list.files("data/all/loca2_mwbm/", full.names = TRUE, pattern = "tasmin|tasmax|lusu|temperature|temp")
+
+walk(temperature_data, ~ {
+  if (grepl("tasmin", .x, ignore.case = TRUE)) {
+    process_loca2_mwbm(nc_path = .x,
+                       water_supplies = water_supplies,
+                       var = "tasmin_tavg",
+                       historical = c("1980-01-01", "2024-12-31"),
+                       future = c("2035-01-01", "2100-12-31"),
+                       output_dir = "data/rapid/inputs/loca2_temperature_water_supplies/")
+  }
+  
+  if (grepl("tasmax", .x, ignore.case = TRUE)) {
+    process_loca2_mwbm(nc_path = .x,
+                       water_supplies = water_supplies,
+                       var = "tasmax_tavg",
+                       historical = c("1980-01-01", "2024-12-31"),
+                       future = c("2035-01-01", "2100-12-31"),
+                       output_dir = "data/rapid/inputs/loca2_temperature_water_supplies/")
+  }
+})
+```
 
 ### Runoff
 
