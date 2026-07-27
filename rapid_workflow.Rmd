@@ -289,6 +289,19 @@ nearby_use_exposure <- calc_nearby_use_exposure(water_supplies,
                                                 output_dir = "data/rapid/outputs/")
 ```
 
+## Water Quality
+
+```{r}
+temp_exp <- calc_temp_exposure(water_supplies,
+                                         temp_data = "data/rapid/inputs/loca2_temperature_water_supplies/",
+                                         hindcast = TRUE,
+                                         historical = c(1980, 2010),
+                                         future = c(2035, 2065),
+                                         water_year = TRUE,
+                                         save = TRUE,
+                                         output_dir = "data/rapid/outputs/",
+                                         verbose = TRUE)
+```
 
 # Sensitivity
 
@@ -389,6 +402,18 @@ calc_drought_sensitivity(water_supplies,
                          save = TRUE,
                          output_dir = "data/rapid/outputs/",
                          verbose = TRUE)
+```
+
+## Water Quality
+
+```{r}
+temp_sen <- calc_temp_sensitivity(water_supplies,
+                                  temp_data = "data/rapid/inputs/loca2_temperature_water_supplies/",
+                                  historical = c(1980, 2010),
+                                  water_year = TRUE,
+                                  save = TRUE,
+                                  output_dir = "data/rapid/outputs/",
+                                  verbose = TRUE)
 ```
 
 
