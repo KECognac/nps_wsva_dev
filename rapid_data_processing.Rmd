@@ -251,3 +251,15 @@ process_coastal_weights(
   output_dir     = here("data", "rapid", "inputs", "coast_comp")
 )
 ```
+
+# Process Groundwater Depth Data
+
+Extracts modeled water table depth at each water supply point from the CONUS-wide RF groundwater depth model (Zenodo 18504963), read from the local copy downloaded to `data/all/groundwater_sensitivity/`.
+
+```{r}
+process_groundwater_depth(
+  water_supplies = water_supplies,
+  save           = TRUE,
+  output_dir     = here("data", "rapid", "inputs", "groundwater_depth")
+)
+```
