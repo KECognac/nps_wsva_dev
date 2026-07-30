@@ -37,6 +37,7 @@ The index workflow calculates a **Total Vulnerability Index** for each NPS water
 | Exposure | Runoff | Change in runoff timing |  |  |  |
 | Exposure | Precipitation | Change in precipitation \* % models predicting decrease in precipitation | \% change in mean annual precipitation weighted by % models predicting decrease in precipitation |  | calc_precip_exposure.R |
 | Exposure | Timing | Change in runoff/precipitation timing |  |  |  |
+| Exposure | Temperature | Change in temperature | Difference (in degrees Celcius) of mean annual temperature between the historical and future time periods using the 90th percentile value across all model_scenario combinations. |  |  |
 | Exposure | Drought | Drought (change in SPEI) \* model agreement |  |  |  |
 | Exposure | Flood | Change in flood risk |  | TBD |  |
 | Exposure | Sea Level Rise | Inundation from sea level rise | \% area inundated under projected sea level rise |  | calc_inundation_exposure.R |
@@ -102,9 +103,10 @@ valid_stems <- c(
   "storm_surge_exposure",
   "swi_exposure",
   "nearby_use_exposure",
-  #"sd_auc_exposure",
-  #"runoff_timing_exposure",
- # "precip_timing_exposure",
+  "timing_mismatch_exposure_Pred_High",
+  "runoff_timing_exposure",
+  "precip_timing_exposure",
+  "temperature_exposure",
   # Sensitivity
   "fire_sensitivity",
   "flood_sensitivity",
@@ -113,9 +115,10 @@ valid_stems <- c(
   "runoff_sensitivity",
   "visitation_sensitivity",
   "inundation_sensitivity",
-  "drought_sensitivity"
- #"sd_auc_sensitivity",
-  #"source_type_sensitivity"
+  "drought_sensitivity",
+  "temperature_sensitivity",
+  "timing_mismatch_sensitivity",
+  "groundwater_depth_sensitivity"
 )
 
 # ── Find the most recent file for each valid stem ────────────────────────────
@@ -179,11 +182,17 @@ indicators_clean <- data %>%
     #exp_norm_runoff_model_agree = norm_runoff_models_showing_decrease,
     exp_runoff_model_agree = raw_runoff_models_showing_decrease,
     
+    exp_runoff_timing_change = raw_runoff_timing_change_magnitude,
+    exp_runoff_timing_change_model_agree = raw_runoff_timing_direction_agreement_fraction,
+    
     # Precipitation
     #exp_precip_change = norm_precipitation_change_p10,
     exp_precip_change = raw_precipitation_change_p10,
     #exp_precip_model_agree = norm_precip_models_showing_decrease,
     exp_precip_model_agree = raw_precip_models_showing_decrease,
+    
+    exp_precip_timing_change = raw_precip_timing_change_magnitude,
+    exp_precip_timing_change_model_agree = raw_precip_timing_direction_agreement_fraction,
     
     # SWE
     #exp_swe_change = norm_swe_change_p10,
@@ -214,6 +223,14 @@ indicators_clean <- data %>%
     # nearby use exposure
     exp_nearby_use_change = raw_use_change_p90,
     exp_nearby_use_model_agree = raw_models_showing_increase_pct,
+    
+    # temperature
+    exp_temp_change = raw_temperature_change_p90,
+    
+    
+    # timing mismatch
+    exp_auc_change = raw_timing_change_p90,
+    # model agreement?
     
     # SENSITIVITY INDICATORS
     
@@ -250,7 +267,17 @@ indicators_clean <- data %>%
     sen_precip_trend  = raw_slope_precip,
     
     # Historic SPEI
-    sen_drought_trend = raw_slope_spei
+    sen_drought_trend = raw_slope_spei,
+    
+    # Historic Temp trend
+    sen_temp_trend = raw_slope_temperature,
+    
+    # Source Type
+    sen_source_type = raw_groundwater_depth_m,
+    
+    # Historic change in timing mismatch (auc)
+    sen_auc_change = raw_timing_mismatch_auc
+    
     
   ) %>% 
   distinct(wsd_source_id, .keep_all = TRUE)
@@ -260,7 +287,7 @@ indicators_clean %>%
   distinct(wsd_source_id, .keep_all = TRUE) %>% 
   summarise(across(everything(), ~sum(!is.na(.)))) %>%
   tidyr::pivot_longer(everything(), names_to = "indicator", values_to = "n_valid") %>%
-  print(n = 30)
+  print(n = 40)
 
 
 ```
