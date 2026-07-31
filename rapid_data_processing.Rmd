@@ -113,7 +113,33 @@ write_csv(delta_fireprob, "data/rapid/inputs/fire_probability_change.csv")
 st_write(pyromes, "data/rapid/inputs/pyromes.gpkg", append = FALSE)
 ```
 
-# Process LOCA2 WBM Files
+# Process LOCA2 Files
+
+### Air Temperature
+
+```{r}
+temperature_data <- list.files("data/all/loca2_mwbm/", full.names = TRUE, pattern = "tasmin|tasmax|lusu|temperature|temp")
+
+walk(temperature_data, ~ {
+  if (grepl("tasmin", .x, ignore.case = TRUE)) {
+    process_loca2_mwbm(nc_path = .x,
+                       water_supplies = water_supplies,
+                       var = "tasmin_tavg",
+                       historical = c("1980-01-01", "2024-12-31"),
+                       future = c("2035-01-01", "2100-12-31"),
+                       output_dir = "data/rapid/inputs/loca2_temperature_water_supplies/")
+  }
+  
+  if (grepl("tasmax", .x, ignore.case = TRUE)) {
+    process_loca2_mwbm(nc_path = .x,
+                       water_supplies = water_supplies,
+                       var = "tasmax_tavg",
+                       historical = c("1980-01-01", "2024-12-31"),
+                       future = c("2035-01-01", "2100-12-31"),
+                       output_dir = "data/rapid/inputs/loca2_temperature_water_supplies/")
+  }
+})
+```
 
 ### Runoff
 
@@ -223,11 +249,15 @@ process_swi_data(
 Filter the Muis et al. (2023) global 100-yr return period storm surge NetCDF to CONUS stations and save as a GeoPackage for use by `calc_storm_surge_exposure()`.
 
 ```{r}
-process_storm_surge_data(
-  data_dir   = here("data", "all", "coast_comp_data", "storm_surge_muis_2023/"),
-  save       = TRUE,
-  output_dir = here("data", "rapid", "inputs", "storm_surge")
-)
+# Get elevation data for coastal sites (for now, just coastal)
+process_elevation_data(water_supplies,
+                       save = TRUE,
+                       output_file = here("data", "rapid", "inputs", "water_supply_elevations.csv"),
+                       verbose = TRUE) 
+
+process_storm_surge_data(data_dir = here("data", "all", "coast_comp_data", "storm_surge_muis_2023/"),
+                         save = TRUE,
+                         output_dir = here("data", "rapid", "inputs", "storm_surge"))
 ```
 
 # Process Coastal Weights
@@ -238,5 +268,17 @@ process_coastal_weights(
   cusp_dir_path  = here("data", "all", "coast_comp_data", "NOAA_CUSP"),
   save           = TRUE,
   output_dir     = here("data", "rapid", "inputs", "coast_comp")
+)
+```
+
+# Process Groundwater Depth Data
+
+Extracts modeled water table depth at each water supply point from the CONUS-wide RF groundwater depth model (Zenodo 18504963), read from the local copy downloaded to `data/all/groundwater_sensitivity/`.
+
+```{r}
+process_groundwater_depth(
+  water_supplies = water_supplies,
+  save           = TRUE,
+  output_dir     = here("data", "rapid", "inputs", "groundwater_depth")
 )
 ```
