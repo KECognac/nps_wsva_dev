@@ -1,0 +1,213 @@
+---
+title: "Inundation Coastal Screen Exploration"
+author: "NPS Water Vulnerability"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    code_folding: hide
+editor_options:
+  markdown:
+    wrap: 80
+---
+
+This notebook checks the effect of the new >50 km coastal NA screen added to
+`calc_inundation_exposure()`. Water supplies more than 50 km from the coast
+(per `coast_distances.csv`, produced by `process_coastal_weights()`) now have
+every inundation indicator column set to `NA`, matching the convention already
+used in `calc_swi_exposure()` and `calc_storm_surge_exposure()`. Some water
+supplies sit within a NOAA SLR raster tile's footprint (e.g. up a tidal
+estuary) while still being more than 50 km by straight-line CUSP-shoreline
+distance — this notebook regenerates a pre-screen version of the results and
+compares it against the official (screened) output to identify exactly which
+water supplies the new screen affects.
+
+# Establish environment
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r}
+source("setup.R")
+mapviewOptions(fgb = FALSE)
+```
+
+# Load data
+
+## Water supplies
+
+```{r}
+water_supplies <- get_wsd(rapid = TRUE)
+```
+
+## Unfiltered inundation exposure (regenerated without the coastal screen)
+
+`calc_inundation_exposure()` does not persist a pre-screen version of its
+results, so we regenerate one here: rebuild the same `ws_scenarios` input used
+in `rapid_workflow.Rmd`, then call the function with a rigged
+`coast_distances` table (every `coast_dist_m` replaced with a non-`NA`
+placeholder) so the >50 km screen has nothing to NA out. This reruns the
+raster extraction, so it takes a few minutes — same cost as the official chunk
+in `rapid_workflow.Rmd`.
+
+```{r}
+inun_regions_path <- here("data", "rapid", "inputs", "coast_comp", "buff_ws_inun_regions.gpkg")
+
+stopifnot(
+  "buff_ws_inun_regions.gpkg not found — run process_inundation_data() in rapid_data_processing.Rmd first" =
+    file.exists(inun_regions_path)
+)
+
+ws_slr_scenarios <- sf::st_read(inun_regions_path, quiet = TRUE) %>%
+  filter(!is.na(proj_file), buffer_km == 4)
+
+ws_all <- ws_slr_scenarios %>%
+  select(-park_unit) %>%
+  right_join(
+    water_supplies %>%
+      st_drop_geometry() %>%
+      select(wsd_source_id, park_unit),
+    by = "wsd_source_id"
+  )
+
+coast_distances_path <- here("data", "rapid", "inputs", "coast_comp", "coast_distances.csv")
+
+stopifnot(
+  "coast_distances.csv not found — run process_coastal_weights() first" =
+    file.exists(coast_distances_path)
+)
+
+# Disable the >50 km screen by replacing NA coast_dist_m with a placeholder —
+# the join/NA-out step in calc_inundation_exposure() only screens rows where
+# coast_dist_m is NA.
+coast_distances_unrestricted <- read_csv(coast_distances_path, show_col_types = FALSE) %>%
+  mutate(coast_dist_m = if_else(is.na(coast_dist_m), 0, coast_dist_m))
+
+coast_distances_unrestricted_path <- tempfile(fileext = ".csv")
+write_csv(coast_distances_unrestricted, coast_distances_unrestricted_path)
+
+inundation_unfiltered <- calc_inundation_exposure(
+  ws_scenarios               = ws_all,
+  inundation_raster_data_dir = here("data", "rapid", "inputs", "coast_comp", "Extent_Rasters"),
+  coast_distances             = coast_distances_unrestricted_path,
+  save    = FALSE,
+  verbose = TRUE
+)
+```
+
+## Filtered inundation exposure (post-screen, official output)
+
+```{r}
+inun_files <- list.files(
+  here("data", "rapid", "outputs"),
+  pattern    = "^inundation_exposure_.*\\.csv$",
+  full.names = TRUE
+)
+
+stopifnot(
+  "No inundation_exposure_*.csv found in data/rapid/outputs — rerun the SLR inundation chunk in rapid_workflow.Rmd" =
+    length(inun_files) > 0
+)
+
+inundation_filtered <- read_csv(inun_files[length(inun_files)], show_col_types = FALSE)
+```
+
+# Identify newly-NA'd water supplies
+
+Flag water supplies (at the 4 km buffer) where any of the core indicator
+columns was non-`NA` before the screen but is `NA` after it — these are the
+sites the >50 km coastal screen actually changed.
+
+```{r}
+screen_cols <- c("raw_coverage_pct_ref", "raw_coverage_pct_proj",
+                  "raw_cell_change", "raw_pct_point_change")
+
+comparison <- inundation_unfiltered %>%
+  filter(buffer_km == 4) %>%
+  select(wsd_source_id, all_of(screen_cols)) %>%
+  rename_with(~ paste0(.x, "_before"), all_of(screen_cols)) %>%
+  inner_join(
+    inundation_filtered %>%
+      filter(buffer_km == 4) %>%
+      select(wsd_source_id, all_of(screen_cols)) %>%
+      rename_with(~ paste0(.x, "_after"), all_of(screen_cols)),
+    by = "wsd_source_id"
+  ) %>%
+  mutate(newly_na = pmap_lgl(
+    list(raw_coverage_pct_ref_before, raw_coverage_pct_ref_after,
+         raw_coverage_pct_proj_before, raw_coverage_pct_proj_after,
+         raw_cell_change_before, raw_cell_change_after,
+         raw_pct_point_change_before, raw_pct_point_change_after),
+    function(ref_b, ref_a, proj_b, proj_a, cell_b, cell_a, pct_b, pct_a) {
+      (!is.na(ref_b)  && is.na(ref_a)) ||
+      (!is.na(proj_b) && is.na(proj_a)) ||
+      (!is.na(cell_b) && is.na(cell_a)) ||
+      (!is.na(pct_b)  && is.na(pct_a))
+    }
+  ))
+
+newly_na_ids <- comparison %>% filter(newly_na) %>% pull(wsd_source_id)
+
+message(length(newly_na_ids), " water supplies were newly set to NA by the >50 km coastal screen.")
+```
+
+# Map
+
+Base layer: all water supplies that were part of the coastal inundation
+analysis before the screen (colored by pre-screen `raw_coverage_pct_proj`),
+grey for water supplies never in the analysis at all (no SLR scenario
+assigned). Circled in black: the subset newly set to `NA` by the >50 km screen.
+
+```{r}
+pal <- colorRampPalette(c("green", "yellow", "red"))
+
+ws_joined <- water_supplies %>%
+  left_join(
+    inundation_unfiltered %>% select(-park_unit),
+    by = "wsd_source_id"
+  )
+
+ws_in_analysis  <- ws_joined %>% filter(!is.na(raw_coverage_pct_proj))
+ws_not_analyzed <- ws_joined %>% filter(is.na(raw_coverage_pct_proj))
+ws_newly_na     <- ws_joined %>% filter(wsd_source_id %in% newly_na_ids)
+
+m <- mapview(ws_not_analyzed,
+             col.regions = "grey70",
+             color       = "grey70",
+             layer.name  = "Not in coastal analysis",
+             popup       = leafpop::popupTable(
+               sf::st_drop_geometry(ws_not_analyzed) %>%
+                 select(wsd_source_id, park_name)
+             )) +
+  mapview(ws_in_analysis,
+          zcol        = "raw_coverage_pct_proj",
+          col.regions = pal,
+          layer.name  = "Proj inundation coverage (%, pre-screen)",
+          popup       = leafpop::popupTable(
+            sf::st_drop_geometry(ws_in_analysis) %>%
+              select(wsd_source_id, park_name,
+                     raw_coverage_pct_ref, raw_coverage_pct_proj,
+                     raw_cell_change, raw_pct_point_change)
+          ))
+
+if (nrow(ws_newly_na) > 0) {
+  m <- m +
+    mapview(ws_newly_na,
+            col.regions = NA,
+            color       = "black",
+            lwd         = 3,
+            cex         = 8,
+            alpha.regions = 0,
+            layer.name  = "Newly NA'd (>50 km coastal screen)",
+            popup       = leafpop::popupTable(
+              comparison %>%
+                filter(wsd_source_id %in% newly_na_ids) %>%
+                left_join(sf::st_drop_geometry(water_supplies) %>%
+                            select(wsd_source_id, park_name),
+                          by = "wsd_source_id")
+            ))
+}
+
+m
+```
