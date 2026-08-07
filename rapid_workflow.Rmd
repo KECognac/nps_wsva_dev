@@ -15,51 +15,12 @@ Read in park system
 parks <- getParkSystem()
 # read in pre-saved park file
 # parks <- st_read("data/rapid/inputs/park_boundaries_2025-08-14.gpkg")
-
-park_centroids <- parks %>% 
-  st_centroid() %>% 
-  st_transform(4326) %>% 
-  dplyr::mutate(y = st_coordinates(.)[,2], x = st_coordinates(.)[,1])
 ```
 
 Read in water supply database for filtered parks
 
 ```{r}
 water_supplies <- get_wsd(rapid = TRUE) 
-
-# table_path <- "data/Water_Supply_Systems/NPS_Water_Systems_Database_Joined.xlsx"
-# water_supplies <- read_excel(table_path,
-#                              sheet = 1,
-#                              na = c("NA", "U"),
-#                              skip = 1) %>%
-#   dplyr::mutate(
-#     source_longitude = as.numeric(source_longitude),
-#     source_latitude = as.numeric(source_latitude)
-#   ) %>%
-#   filter(!state %in% c("AK", "AS", "HI", "MP", "PR", "VI")) %>%
-#   left_join(
-#     park_centroids %>% 
-#       st_drop_geometry() %>% 
-#       dplyr::select(UNIT_CODE, x, y),
-#     by = c(park_unit = "UNIT_CODE")
-#   ) %>% dplyr::mutate(
-#     coords_flag = ifelse(
-#       is.na(source_longitude) |
-#         is.na(source_latitude),
-#       "Centroid",
-#       "Source Coordinates"
-#     ),
-#     source_longitude = ifelse(is.na(source_longitude), x, source_longitude),
-#     source_latitude = ifelse(is.na(source_latitude), y, source_latitude)
-#   ) %>%
-#   # remove municipal and hauled source types, accounting for database entry errors
-#   filter(!str_detect(source_type, regex("municipal|hauled", ignore_case = TRUE))) %>%
-#   drop_na(source_longitude, source_latitude) %>%
-#   st_as_sf(coords = (c("source_longitude", "source_latitude")),
-#            crs = 4326,
-#            remove = FALSE)
-
-
 ```
 
 Save water supplies to app data
@@ -145,6 +106,18 @@ runoff_exp <- calc_runoff_exposure(water_supplies = water_supplies,
 # 4 minutes for 1412 water sources when hindcast = FALSE
 ```
 
+```{r}
+runoff_time_exp <- calc_runoff_timing_exposure(water_supplies,
+                                               runoff_data = "data/rapid/inputs/loca2_runoff_water_supplies/",
+                                               hindcast = TRUE,
+                                               historical = c(1980, 2010),
+                                               future = c(2035, 2065),
+                                               water_year = TRUE,
+                                               save = TRUE,
+                                               output_dir = "data/rapid/outputs/",
+                                               verbose = TRUE)
+```
+
 ### Precipitation
 
 ```{r}
@@ -161,6 +134,20 @@ precip_exp <- calc_precip_exposure(water_supplies = water_supplies,
 # 7 minutes for 1412 water sources when hindcast = TRUE
 # 19 minutes for 1412 water sources when hindcast = FALSE (observed data is daily!)
 ```
+
+```{r}
+precip_time_exp <- calc_precip_timing_exposure(water_supplies,
+                                               precip_data = "data/rapid/inputs/loca2_precipitation_water_supplies/",
+                                               hindcast = TRUE,
+                                               historical = c(1980, 2010),
+                                               future = c(2035, 2065),
+                                               water_year = TRUE,
+                                               save = TRUE,
+                                               output_dir = "data/rapid/outputs/",
+                                               verbose = TRUE)
+```
+
+
 
 ### Snow Water Equivalent (SWE)
 
@@ -200,24 +187,22 @@ drought_exp <- calc_drought_exposure(water_supplies,
 Worst-case CMIP6 model change in 100-year return period storm surge level (future 2021-2050 minus historical 1985-2014) at the nearest coastal station, divided by distance to coast; water supplies >50 km from the nearest surge station receive NA.
 
 ```{r}
-storm_surge_exp <- calc_storm_surge_exposure(
-  water_supplies        = water_supplies,
-  storm_surge_stations  = here("data", "rapid", "inputs", "storm_surge",
-                               "storm_surge_exposure_conus.gpkg"),
-  coast_distances       = here("data", "rapid", "inputs", "coast_comp", "coast_distances.csv"),
-  save       = TRUE,
-  output_dir = here("data", "rapid", "outputs"),
-  verbose    = TRUE
-)
+storm_surge_exp <- calc_storm_surge_exposure(water_supplies = water_supplies,
+                                             storm_surge_stations  = here("data", "rapid", "inputs", "storm_surge","storm_surge_exposure_conus.gpkg"),
+                                             coast_distances = here("data", "rapid", "inputs", "coast_comp", "coast_distances.csv"),
+                                             site_elevations = here("data", "rapid", "inputs", "water_supply_elevations.csv"),
+                                             save = TRUE,
+                                             output_dir = here("data", "rapid", "outputs"),
+                                             verbose = TRUE)
 ```
 
 ## Sea Level Rise Inundation
 
 ```{r}
-# Read buffered water supply scenarios, filter to 4 km and valid inundation files
+# Read buffered (4 km) water supply scenarios, filter to valid inundation files
 ws_slr_scenarios <- sf::st_read(here("data", "rapid", "inputs", "coast_comp",
                                      "buff_ws_inun_regions.gpkg")) %>%
-  filter(!is.na(proj_file), buffer_km == 4)
+  filter(!is.na(proj_file))
 
 # Right-join all water supplies onto ws_slr_scenarios:
 ws_all <- ws_slr_scenarios %>%
@@ -238,7 +223,7 @@ slr_inundation_exp <- calc_inundation_exposure(
   verbose    = TRUE
 )
 
-# 5 minutes for all water sources
+# 11 minutes for all water sources
 ```
 
 ## Saltwater Intrusion
@@ -259,12 +244,25 @@ swi_exp <- calc_swi_exposure(
 Data currently from USFS compilation of all USGS data use data by county:
 ```{r}
 nearby_use_exposure <- calc_nearby_use_exposure(water_supplies,
-                                                     observed_use = fread("data/all/RPAWaterDemand/1_BaseData/Trash 2022/usgswithdrawals.csv"),
-                                                     future_use = fread("data/all/RPAWaterDemand/2_Demand_Results/cons_and_withdrawal.csv"),
-                                                     save = TRUE,
-                                                     output_dir = "data/rapid/outputs/")
+                                                observed_use = fread("data/all/RPAWaterDemand/1_BaseData/Trash 2022/usgswithdrawals.csv"),
+                                                future_use = fread("data/all/RPAWaterDemand/2_Demand_Results/cons_and_withdrawal.csv"),
+                                                save = TRUE,
+                                                output_dir = "data/rapid/outputs/")
 ```
 
+## Water Quality
+
+```{r}
+temp_exp <- calc_temp_exposure(water_supplies,
+                                         temp_data = "data/rapid/inputs/loca2_temperature_water_supplies/",
+                                         hindcast = TRUE,
+                                         historical = c(1980, 2010),
+                                         future = c(2035, 2065),
+                                         water_year = TRUE,
+                                         save = TRUE,
+                                         output_dir = "data/rapid/outputs/",
+                                         verbose = TRUE)
+```
 
 # Sensitivity
 
@@ -350,6 +348,33 @@ swe_sen <- calc_swe_sensitivity(water_supplies,
                                 verbose = TRUE) %>%
   # additional metadata, don't necessarily need but interesting to review as we finalize indicator
   select(-c(n_years, trend_direction, mk_significant))
+```
+
+## Drought as SPEI
+```{r}
+calc_drought_sensitivity(water_supplies,
+                         precip_data = "data/rapid/inputs/loca2_precipitation_water_supplies/",
+                         pet_data = "data/rapid/inputs/loca2_pet_water_supplies/",
+                         spei_scale = 12,
+                         spei_inf_cap = 4,
+                         drought_threshold = -1,
+                         historical = c(1980, 2010),
+                         water_year = TRUE,
+                         save = TRUE,
+                         output_dir = "data/rapid/outputs/",
+                         verbose = TRUE)
+```
+
+## Water Quality
+
+```{r}
+temp_sen <- calc_temp_sensitivity(water_supplies,
+                                  temp_data = "data/rapid/inputs/loca2_temperature_water_supplies/",
+                                  historical = c(1980, 2010),
+                                  water_year = TRUE,
+                                  save = TRUE,
+                                  output_dir = "data/rapid/outputs/",
+                                  verbose = TRUE)
 ```
 
 
