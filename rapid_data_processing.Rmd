@@ -64,7 +64,7 @@ Combine all Gao et al. files and save final file to feed into `calc_fire_exposur
 ```{r}
 # read in input datasets
 pyromes <- st_read("data/all/usfs_fire/Pyromes-RDS-2020-0020/Data/Pyromes_CONUS_20200206.shp") %>%
-  st_make_valid() %>% 
+  st_make_valid() %>%
   sf::st_transform(4326)
 
 
@@ -81,45 +81,34 @@ delta_fireprob <- read_csv("data/all/usfs_fire/fire_projections_gao_2021/tables1
   mutate(GCM = paste0(GCM, ".rcp45")) %>%
   # do same thing on the 85 CFs, then bind together:
   bind_rows(
-    read_csv("data/all/usfs_fire/fire_projections_gao_2021/tables6-85-midcentury.csv") %>%
+    read_csv(
+      "data/all/usfs_fire/fire_projections_gao_2021/tables6-85-midcentury.csv"
+    ) %>%
       tidyr::pivot_longer(-PYROME, names_to = "gao", values_to = "value") %>%
       left_join(crosswalk, by = "gao") %>%
       mutate(GCM = paste0(GCM, ".rcp85"))
   ) %>%
   # join historic data by pyrome:
   left_join(fireprob_historic, by = "PYROME") %>%
-  # Description: "The probability of a fire increases/decreases by `delta_fp` percent." 
-  #mutate(delta_fp = 100 * ((value - GridMet)/GridMet)) 
+  # Description: "The probability of a fire increases/decreases by `delta_fp` percent."
+  #mutate(delta_fp = 100 * ((value - GridMet)/GridMet))
   # new method, pulling each model's specific hind cast value instead of Gridmet
-  rowwise() %>% 
+  rowwise() %>%
   # No historic value for NorESM1 so using ensemble mean for that one
-  mutate(delta_fp = 100 * ((value - get(ifelse(gao == "NorESM1", "ensemblemean", gao)))/get(ifelse(gao == "NorESM1", "ensemblemean", gao)))) %>%
-  ungroup()
-
-# Pull 10th, 50th and 90th percentile values for each pyrome
-pyromes_selected <- delta_fireprob %>%
-  group_by(PYROME) %>%
-  slice(c(which.min(abs(delta_fp - quantile(delta_fp, 0.1))),
-          which.min(abs(delta_fp - quantile(delta_fp, 0.5))),
-          which.min(abs(delta_fp - quantile(delta_fp, 0.9))))) %>%
-  mutate(percentile = case_when(
-    delta_fp == delta_fp[which.min(abs(delta_fp - quantile(delta_fp, 0.1)))] ~ "p10",
-    delta_fp == delta_fp[which.min(abs(delta_fp - quantile(delta_fp, 0.5)))] ~ "p50", 
-    delta_fp == delta_fp[which.min(abs(delta_fp - quantile(delta_fp, 0.9)))] ~ "p90"
-  )) %>%
-  ungroup() %>%
-  pivot_wider(
-    names_from = percentile,
-    values_from = c(gao, value, GCM, GridMet, delta_fp),
-    names_sep = "_"
-  )
+  mutate(delta_fp = 100 * ((value - get(
+    ifelse(gao == "NorESM1", "ensemblemean", gao)
+  )) / get(
+    ifelse(gao == "NorESM1", "ensemblemean", gao)
+  ))) %>%
+  ungroup() %>% 
+  select(PYROME, GCM, delta_fp)
 
 ```
 
 Save files
 
 ```{r}
-write_csv(pyromes_selected, "data/rapid/inputs/pyromes_selected.csv")
+write_csv(delta_fireprob, "data/rapid/inputs/fire_probability_change.csv")
 
 st_write(pyromes, "data/rapid/inputs/pyromes.gpkg", append = FALSE)
 ```
