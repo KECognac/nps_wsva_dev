@@ -68,12 +68,12 @@ Increase in likelihood of fires
 # read in files
 pyromes <- st_read("data/rapid/inputs/pyromes.gpkg")
 
-pyromes_selected <- read_csv("data/rapid/inputs/pyromes_selected.csv")
+fire_prob_data <- read_csv("data/rapid/inputs/fire_probability_change.csv")
 
 # Calculate indicator
 fire_exp <- calc_fire_exposure(
   water_supplies = water_supplies,
-  fire_prob_data = pyromes_selected,
+  fire_prob_data = fire_prob_data,
   pyrome_data = pyromes,
   save = TRUE,
   output_dir = "data/rapid/outputs/"
