@@ -154,7 +154,7 @@ indicator_registry <- tribble(
   # Hazards
   "sen_wildfire_hazard",                  "raw_wildfire_hazard_mean",                     "fire_sensitivity",                    "Sensitivity", "Wildfire",
   "sen_flood_risk",                       "raw_flood_risk_percent",                       "flood_sensitivity",                   "Sensitivity", "Flood",
-  "sen_inundation_current",               "raw_coverage_pct_ref",                         "inundation_sensitivity",              "Sensitivity", "Sea Level Rise"
+  "sen_inundation_current",               "raw_coverage_pct_ref",                         "inundation_exposure",              "Sensitivity", "Sea Level Rise"
 
   # ---- NOT YET WIRED (uncomment when the output exists) --------------------
   # NOTE: add a trailing comma to the row above before uncommenting any of these
