@@ -282,3 +282,19 @@ process_groundwater_depth(
   output_dir     = here("data", "rapid", "inputs", "groundwater_depth")
 )
 ```
+
+
+yh# Process Water Rights Indicator Data [Aqueduct V4.0]
+
+```{r}
+process_waterrightsindicator_data(
+  water_supplies,
+  gdb_path   = here("data", "all", "aqueduct_v4",
+                    "Aqueduct40_waterrisk_download_Y2023M07D05", "GDB",
+                    "Aq40_Y2023D07M05.gdb"),
+  save_intermediate = TRUE,
+  save       = TRUE,
+  output_dir = here("data", "rapid", "inputs", "WaterRightsIndicator"),
+  verbose    = TRUE) 
+```
+
