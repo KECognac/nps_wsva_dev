@@ -125,8 +125,9 @@ walk(temperature_data, ~ {
     process_loca2_mwbm(nc_path = .x,
                        water_supplies = water_supplies,
                        var = "tasmin_tavg",
-                       historical = c("1980-01-01", "2024-12-31"),
-                       future = c("2035-01-01", "2100-12-31"),
+                       grab_nearest = TRUE,
+                       historical = c("1979-10-01", "2024-12-31"),
+                       future = c("2034-10-01", "2100-12-31"),
                        output_dir = "data/rapid/inputs/loca2_temperature_water_supplies/")
   }
   
@@ -134,8 +135,9 @@ walk(temperature_data, ~ {
     process_loca2_mwbm(nc_path = .x,
                        water_supplies = water_supplies,
                        var = "tasmax_tavg",
-                       historical = c("1980-01-01", "2024-12-31"),
-                       future = c("2035-01-01", "2100-12-31"),
+                       grab_nearest = TRUE,
+                       historical = c("1979-10-01", "2024-12-31"),
+                       future = c("2034-10-01", "2100-12-31"),
                        output_dir = "data/rapid/inputs/loca2_temperature_water_supplies/")
   }
 })
@@ -151,6 +153,7 @@ walk(runoff_data, ~process_loca2_mwbm(.x,
                                       output_dir = "data/rapid/inputs/loca2_runoff_water_supplies/",
                                       water_supplies = water_supplies %>% select(park_unit, wsd_source_id),
                                       var = "runoff",
+                                      grab_nearest = TRUE,
                                       historical = c("1979-01-01", "2014-12-31"),
                                       future = c("2015-01-01", "2100-12-31")))
 
@@ -167,10 +170,30 @@ walk(precip_data, ~try(process_loca2_mwbm(.x,
                                           output_dir = "data/rapid/inputs/loca2_precipitation_water_supplies/",
                                           water_supplies = water_supplies %>% select(park_unit, wsd_source_id),
                                           var = "pr",
+                                          grab_nearest = TRUE,
                                           historical = c("1979-01-01", "2014-12-31"),
                                           future = c("2015-01-01", "2100-12-31"))))
 
 # took 57 minutes
+```
+
+### Consecutive Dry and Wet Periods
+
+Extract the annual maximum consecutive dry-day (CDD) and wet-day (CWD) spell
+lengths from the revised LOCA2 precipitation-extremes dataset.
+
+```{r}
+precip_period_data <- list.files("data/all/loca_cmip6_precip_products/",
+                                 full.names = TRUE,
+                                 recursive = TRUE,
+                                 pattern = "\\.nc$")
+
+walk(precip_period_data, ~ process_precip_period_data(nc_path = .x,
+                                                      water_supplies = water_supplies %>%
+                                                        select(park_unit, wsd_source_id),
+                                                      output_dir = "data/rapid/inputs/loca_cmip6_precip_periods_water_supplies/",
+                                                      overwrite = FALSE,
+                                                      verbose = TRUE))
 ```
 
 ### Snow Water Equivalent
@@ -183,6 +206,7 @@ walk(snow_data, ~process_loca2_mwbm(.x,
                                     output_dir = "data/rapid/inputs/loca2_swe_water_supplies/",
                                     water_supplies = water_supplies %>% select(park_unit, wsd_source_id),
                                     var = "swe",
+                                    grab_nearest = TRUE,
                                     historical = c("1979-01-01", "2014-12-31"),
                                     future = c("2015-01-01", "2100-12-31")))
 
@@ -199,10 +223,43 @@ walk(pet_data, ~process_loca2_mwbm(.x,
                                    output_dir = "data/rapid/inputs/loca2_pet_water_supplies/",
                                    water_supplies = water_supplies %>% select(park_unit, wsd_source_id),
                                    var = "pet",
+                                   grab_nearest = TRUE,
                                    historical = c("1979-01-01", "2014-12-31"),
                                    future = c("2015-01-01", "2100-12-31")))
 
 # took 24 minutes
+```
+
+### Actual Evapotranspiration
+
+```{r}
+aet_data <- list.files("data/all/loca2_mwbm/",
+                       full.names = TRUE,
+                       pattern = "aet_MWBM")
+
+walk(aet_data, ~process_loca2_mwbm(.x,
+                                   output_dir = "data/rapid/inputs/loca2_aet_water_supplies/",
+                                   water_supplies = water_supplies %>% select(park_unit, wsd_source_id),
+                                   var = "aet",
+                                   grab_nearest = TRUE,
+                                   historical = c("1979-01-01", "2014-12-31"),
+                                   future = c("2015-01-01", "2100-12-31")))
+```
+
+### Soil-Water Storage
+
+```{r}
+stor_data <- list.files("data/all/loca2_mwbm/",
+                        full.names = TRUE,
+                        pattern = "stor_MWBM")
+
+walk(stor_data, ~process_loca2_mwbm(.x,
+                                    output_dir = "data/rapid/inputs/loca2_stor_water_supplies/",
+                                    water_supplies = water_supplies %>% select(park_unit, wsd_source_id),
+                                    var = "stor",
+                                    grab_nearest = TRUE,
+                                    historical = c("1979-01-01", "2014-12-31"),
+                                    future = c("2015-01-01", "2100-12-31")))
 ```
 
 ### Drought Data
@@ -276,9 +333,9 @@ process_coastal_weights(
 Extracts modeled water table depth at each water supply point from the CONUS-wide RF groundwater depth model (Zenodo 18504963), read from the local copy downloaded to `data/all/groundwater_sensitivity/`.
 
 ```{r}
-process_groundwater_depth(
-  water_supplies = water_supplies,
-  save           = TRUE,
-  output_dir     = here("data", "rapid", "inputs", "groundwater_depth")
-)
+process_groundwater_depth(water_supplies = water_supplies,
+                          save = TRUE,
+                          output_dir = "data/rapid/inputs/groundwater_depth/")
 ```
+
+
