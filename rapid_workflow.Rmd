@@ -184,13 +184,10 @@ drought_exp <- calc_drought_exposure(water_supplies,
 
 ## Storm Surge
 
-Worst-case CMIP6 model change in 100-year return period storm surge level (future 2021-2050 minus historical 1985-2014) at the nearest coastal station, divided by distance to coast; water supplies >50 km from the nearest surge station receive NA.
-
 ```{r}
 storm_surge_exp <- calc_storm_surge_exposure(water_supplies = water_supplies,
-                                             storm_surge_stations  = here("data", "rapid", "inputs", "storm_surge","storm_surge_exposure_conus.gpkg"),
-                                             coast_distances = here("data", "rapid", "inputs", "coast_comp", "coast_distances.csv"),
-                                             site_elevations = here("data", "rapid", "inputs", "water_supply_elevations.csv"),
+                                             storm_surge_stations = here("data", "rapid", "inputs", "storm_surge","storm_surge_RP10_muis_2023.gpkg"),
+                                             coast_geometry = here("data", "rapid", "inputs", "coast_comp", "coastal_site_geometry.csv"),
                                              save = TRUE,
                                              output_dir = here("data", "rapid", "outputs"),
                                              verbose = TRUE)
@@ -232,7 +229,7 @@ slr_inundation_exp <- calc_inundation_exposure(
 swi_exp <- calc_swi_exposure(
   water_supplies  = water_supplies,
   swi_pts         = here("data", "rapid", "inputs", "swi", "swi_points.gpkg"),
-  coast_distances = here("data", "rapid", "inputs", "coast_comp", "coast_distances.csv"),
+  coast_distances = here("data", "rapid", "inputs", "coast_comp", "coastal_site_geometry.csv"),
   save            = TRUE,
   output_dir      = here("data", "rapid", "outputs"),
   verbose         = TRUE
@@ -429,6 +426,17 @@ groundwater_depth_sen <- calc_groundwater_depth_sensitivity(
   output_dir       = "data/rapid/outputs/",
   verbose          = TRUE
 )
+```
+
+## Storm Surge
+
+```{r}
+storm_surge_sen <- calc_storm_surge_sensitivity(water_supplies = water_supplies,
+                                                storm_surge_stations = here("data", "rapid", "inputs", "storm_surge","storm_surge_RP10_muis_2023.gpkg"),
+                                                coast_geometry = here("data", "rapid", "inputs", "coast_comp", "coastal_site_geometry.csv"),
+                                                save = TRUE,
+                                                output_dir = here("data", "rapid", "outputs"),
+                                                verbose = TRUE)
 ```
 
 # Testing
