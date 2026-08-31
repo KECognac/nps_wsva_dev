@@ -36,12 +36,32 @@ This section explains why `calc_storm_surge_exposure()` and
 docstrings are kept short and point here. Each choice is worked through in the
 sections further down.
 
+## Both indicators use RP10, not RP100
+
+Earlier versions of these indicators used the 100-year return period (RP100).
+Both now use the 10-year return period (RP10). The Muis et al. (2023) return
+levels come from an extreme-value fit to roughly 30-year simulated
+water-level epochs, and a 30-year sample supports an RP10 estimate far better
+than an RP100 one: RP100 uncertainty is large and is worst in
+tropical-cyclone-prone regions, which is exactly the Gulf and Atlantic coast
+where most of the coastal parks are. The paper itself leads with RP10 and
+puts RP100 in supplementary material for the same reason. RP10 also keeps us
+from re-deriving our own extreme-value fit. The CMCC-CM2-VHR4 bias, the
+low-baseline sensitivity of percent change, and the Pacific-vs-Gulf/Atlantic
+split all still show up at RP10, just at a smaller magnitude than at RP100.
+
 ## Exposure uses the worst-case model, with CMCC-CM2-VHR4 excluded
 
 Exposure is meant to capture the largest projected change at each station, so
 we take the worst case across the 4 models rather than an average. The worst
 case is the largest percent change from the reference period to the future
-period.
+period. We use percent change rather than absolute change because the 4
+models disagree on both the reference-period surge level and the future
+level at the same station, so a change in metres is not comparable across
+them; a percent change puts each model's projection on its own baseline.
+Taking the worst case rather than the ensemble mean is also consistent with
+the other rapid indicators, which pull the 90th-percentile model rather than
+the multi-model mean.
 
 CMCC-CM2-VHR4 is left out of that pool. Muis et al. (2023) flag it as their
 most biased model at RP100 (0.14 m mean bias), and it is biased high at RP10
@@ -81,6 +101,13 @@ the set of water supplies changes.
 We use an RMS blend so one term can partly make up for the other. An earlier
 version multiplied the two weights together, which zeroed out 180 of 347
 sites, including many that were well within 250 m of the coast.
+
+The distance-to-coast term is a stand-in until the LECZ dataset can be
+brought in directly. Right now the horizontal weight is a fixed 50 km linear
+ramp; once the LECZ layer is available, the same 10 m coastal-zone definition
+that anchors the elevation term can anchor the horizontal distance term as
+well, so both halves of the weight use one consistent coastal-zone
+definition.
 
 # Setup
 
@@ -147,7 +174,9 @@ coast_geometry_path <- here("data", "rapid", "inputs", "coast_comp", "coastal_si
 # Last exposure output before this round of changes (pre-RMS weighting, RP100,
 # no CMCC exclusion, worst-case by absolute change). Used only for the
 # old-vs-new exposure comparison; that comparison bundles several changes at
-# once, and the sections below isolate the CMCC exclusion on its own.
+# once. Because it kept all 4 models, it also serves as the "with CMCC" side
+# of the exclusion; the per-model distribution behind the exclusion is in
+# "Why CMCC-CM2-VHR4 is excluded".
 old_exposure <- readr::read_csv(
   here("data", "rapid", "outputs", "storm_surge_exposure_2026-08-13.csv"),
   show_col_types = FALSE
@@ -165,10 +194,11 @@ inundation_exposure <- readr::read_csv(
 ) %>%
   filter(buffer_km == 4)
 
-inundation_sensitivity <- readr::read_csv(
-  here("data", "rapid", "outputs", "inundation_sensitivity_2026-03-31.csv"),
-  show_col_types = FALSE
-)
+# SLR-inundation sensitivity is the percent of the 4 km buffer already
+# inundated at the reference tide level (raw_coverage_pct_ref from
+# calc_inundation_exposure). This is the same value the app feeds into
+# sen_inundation_current / factor_sen_slr (see vulnerability_index_calculation.Rmd),
+# not the deprecated distance-to-CUSP-shoreline sensitivity.
 ```
 
 ```{r}
@@ -211,7 +241,8 @@ relate to each other. The design choices behind them:
 
 | Choice | Effect |
 |---|---|
-| Exposure is the worst-case model by percent change | Captures the largest projected change at each station instead of pulling it toward the ensemble center. |
+| Both indicators use RP10, not RP100 | The Muis (2023) return levels are an extreme-value fit to ~30-year epochs, so RP10 is well supported where RP100 is highly uncertain, worst in the hurricane-prone Gulf and Atlantic. The paper leads with RP10 for the same reason. |
+| Exposure is the worst-case model by percent change | Percent change rather than absolute change, because the models disagree on both the reference-period and the future surge level at a station, so a change in metres is not comparable across them. Worst-case rather than the ensemble mean keeps the largest projected relative change instead of smoothing it out. |
 | CMCC-CM2-VHR4 is excluded from the exposure pool | Drops a nationally biased-high model that otherwise wins worst-case almost everywhere once the criterion is percent change. |
 | Sensitivity is the 4-model mean of the reference level | The reference period already happened, so there is no future worst case, only per-model estimation error, which a mean averages down. |
 | RMS distance + elevation weight, elevation capped at 10 m | Discounts the offshore station value by how coastal and how low the water supply is. RMS lets one term partly cover for the other so the elevation cap does not zero out sites right on the coast. |
@@ -247,9 +278,11 @@ information that either one alone would miss.
 Previous exposure output against current production. The previous output
 predates the RMS weighting, used RP100, kept all 4 models, and picked the
 worst case by absolute change rather than percent change, so this comparison
-bundles several changes at once. The section below it isolates the CMCC
-exclusion on its own. Shown as normalized score and percentile rank, so
-neither scale is left implicit.
+bundles several changes at once. Because the previous output kept all 4
+models, the CMCC-CM2-VHR4 exclusion is one of the changes folded in here; the
+per-model percent-change distributions that motivate that exclusion are in
+"What if CMCC-CM2-VHR4 is excluded" below. Shown as normalized score and
+percentile rank, so neither scale is left implicit.
 
 ```{r}
 old_sf <- water_supplies %>%
@@ -289,6 +322,25 @@ m_new_rank <- mapview(new_sf, zcol = "rank_surge_pct_change_max", col.regions = 
 leafsync::sync(m_old_norm, m_new_norm, m_old_rank, m_new_rank, ncol = 2)
 ```
 
+The norm and rank maps tell different stories at the low end because `norm`
+is a min-max rescale and the raw percent-change distribution is heavily
+right-skewed. The maximum, `FOSU_WS_002_01` at +29%, plus a cluster of EVER
+sites near +20%, stretch the top of the 0-1 scale, so the median site
+(raw ~2.3%) lands at norm ~0.20 and the 80th percentile only reaches
+norm ~0.37. Read the rank map, not the norm map, when comparing mid-pack
+sites.
+
+Biscayne (BISC) is the clearest case. Its water supplies sit right on the
+coast below 2 m elevation, so the distance/elevation weight barely discounts
+them (joint weight ~0.94), and their raw percent change (~5.5%) is the ~70th
+percentile by rank. But because the norm scale is stretched by the +20-29%
+tail, BISC still reads norm ~0.29. The kept models (CMCC-CM2-VHR4 excluded)
+project only a small RP10 increase at the South Florida stations, and BISC's
+storm surge *sensitivity* is also low (reference surge ~0.2 m, norm ~0.08):
+the Muis RP10 baseline surge for those stations is genuinely small. A large
+BISC surge is a longer-return-period tail event that RP10 does not capture,
+so both storm surge indicators read low there by construction, not by error.
+
 ## Previous vs. current: rank movement
 
 ```{r}
@@ -306,13 +358,26 @@ rank_slopegraph(rank_compare, rank_old, rank_new,
                 "Storm surge exposure percentile rank: previous vs. current")
 ```
 
-Point Reyes (PORE) is the clearest mover. Every PORE water supply jumps from a
-low single-digit percent change to a much higher one. That shift comes from
-CMCC-CM2-VHR4, which wins the worst-case slot at all of PORE's nearest
-stations once the criterion is percent change. The next section isolates that
-model.
+Cape Cod (CACO) is the largest single mover. Its water supplies ranked around
+the 65th-80th percentile under the previous output and drop to roughly the
+3rd-35th under current production. At every CACO nearest station
+CMCC-CM2-VHR4 is the only model of the four projecting a meaningful RP10
+increase (+27% to +34%); the other three are flat to slightly negative
+(-6% to +2%). The previous pipeline kept CMCC and it won the worst-case slot;
+current production drops it, so the worst case among the remaining three is
+near zero and CACO falls down the ranking. Several CACO sites also sit above
+the 10 m LECZ elevation cap, so their elevation weight is 0 and the RMS joint
+weight floors near 0.70, roughly halving an already-small value.
 
-# What if CMCC-CM2-VHR4 is excluded from the worst-case model pool?
+Point Reyes (PORE) splits. The PORE sites where CMCC-CM2-VHR4 won the old
+RP100 absolute-change slot (raw change ~40-50%) fall just as CACO does
+(`PORE_WS_006` goes 87 -> 17). The other PORE sites, which the old
+absolute-change pipeline scored near zero because the absolute change there is
+tiny, move up to mid-pack. Both directions trace back to the same
+CMCC-CM2-VHR4 behavior. The next section shows the per-model percent-change
+distribution behind the exclusion.
+
+# Why CMCC-CM2-VHR4 is excluded from the worst-case model pool
 
 Muis et al. (2023) flag CMCC-CM2-VHR4 as their most biased ensemble member,
 worst at the RP100 return period ("a higher mean bias than other models,
@@ -396,169 +461,15 @@ nationally biased-high model, and switching the worst-case criterion to
 percent change (which hunts for the largest relative jump) makes it the winner
 almost everywhere.
 
-## Worst-case with and without CMCC-CM2-VHR4
-
-`calc_storm_surge_exposure_filtered()` is a parameterized copy of production's
-logic with one added `filter(!model %in% exclude_models)` step before the
-per-station worst-case reduction. It builds both sides of the comparison here,
-all 4 models and CMCC-excluded, independently of what production does by
-default (production already excludes CMCC-CM2-VHR4).
-
-```{r}
-calc_storm_surge_exposure_filtered <- function(water_supplies,
-                                               storm_surge_stations,
-                                               coast_geometry,
-                                               exclude_models = character(0)) {
-  if (is.character(storm_surge_stations)) {
-    storm_surge_stations <- sf::st_read(storm_surge_stations, quiet = TRUE)
-  }
-
-  prepped_stations <- storm_surge_stations %>%
-    filter(!model %in% exclude_models) %>%
-    group_by(station_idx) %>%
-    mutate(raw_surge_change_max = future_mean - reference_mean,
-           raw_surge_pct_change_max = ((future_mean - reference_mean) / reference_mean) * 100) %>%
-    slice_max(raw_surge_pct_change_max, n = 1, with_ties = FALSE) %>%
-    ungroup() %>%
-    select(station_idx, model, raw_surge_change_max, raw_surge_pct_change_max, lat, lon)
-
-  ws_proj <- sf::st_transform(water_supplies, 5070)
-  stations_proj <- sf::st_transform(prepped_stations, 5070)
-
-  nn_result <- nngeo::st_nn(ws_proj, stations_proj, k = 1, returnDist = TRUE, progress = FALSE)
-  nn_idx <- unlist(nn_result$nn)
-  nn_dist <- unlist(nn_result$dist)
-
-  results <- water_supplies %>%
-    sf::st_drop_geometry() %>%
-    dplyr::select(wsd_source_id, park_unit, park_name) %>%
-    dplyr::mutate(nn_dist_m = nn_dist,
-                  raw_surge_change_max = stations_proj$raw_surge_change_max[nn_idx],
-                  raw_surge_pct_change_max = stations_proj$raw_surge_pct_change_max[nn_idx]) %>%
-    dplyr::mutate(raw_surge_change_max = dplyr::if_else(nn_dist_m > 50000, NA_real_, raw_surge_change_max),
-                  raw_surge_pct_change_max = dplyr::if_else(nn_dist_m > 50000, NA_real_, raw_surge_pct_change_max)) %>%
-    dplyr::select(-nn_dist_m)
-
-  coast_geometry_df <- readr::read_csv(coast_geometry, show_col_types = FALSE)
-
-  results <- results %>%
-    dplyr::left_join(coast_geometry_df, by = c("wsd_source_id", "park_unit", "park_name")) %>%
-    mutate(raw_surge_change_max = dplyr::if_else(coast_dist_m > 50000, NA_real_, raw_surge_change_max))
-
-  lecz_cap_m <- 10
-
-  results <- results %>%
-    dplyr::mutate(
-      coast_weight = pmax(0, 1 - pmin(coast_dist_m, 50000) / 50000),
-      elev_weight = 1 - pmin(pmax(coast_elev_m, 0) / lecz_cap_m, 1),
-      joint_weight = sqrt((coast_weight^2 + elev_weight^2) / 2),
-      raw_surge_change_max = raw_surge_change_max * joint_weight,
-      raw_surge_pct_change_max = raw_surge_pct_change_max * joint_weight) %>%
-    dplyr::select(-c(coast_dist_m, coast_weight, elev_weight, joint_weight))
-
-  results %>%
-    add_standardized_indicators("raw_surge_change_max", invert = FALSE) %>%
-    add_standardized_indicators("raw_surge_pct_change_max", invert = FALSE)
-}
-
-all4_exposure <- calc_storm_surge_exposure_filtered(
-  water_supplies = water_supplies,
-  storm_surge_stations = storm_surge_stations_path,
-  coast_geometry = coast_geometry_path,
-  exclude_models = character(0)
-) %>%
-  distinct(wsd_source_id, .keep_all = TRUE) %>%
-  mutate(across(where(is.numeric), as.numeric))
-
-no_cmcc_exposure <- calc_storm_surge_exposure_filtered(
-  water_supplies = water_supplies,
-  storm_surge_stations = storm_surge_stations_path,
-  coast_geometry = coast_geometry_path,
-  exclude_models = "CMCC-CM2-VHR4"
-) %>%
-  distinct(wsd_source_id, .keep_all = TRUE) %>%
-  mutate(across(where(is.numeric), as.numeric))
-```
-
-```{r}
-# Sanity check: no_cmcc_exposure is the standalone CMCC-excluded reimplementation
-# above. new_exposure is production's own calc_storm_surge_exposure(), which also
-# excludes CMCC-CM2-VHR4 by default. They should agree almost exactly.
-sanity_check <- no_cmcc_exposure %>%
-  select(wsd_source_id, norm_standalone = norm_surge_pct_change_max) %>%
-  inner_join(new_exposure %>% select(wsd_source_id, norm_production = norm_surge_pct_change_max),
-             by = "wsd_source_id") %>%
-  filter(!is.na(norm_standalone), !is.na(norm_production))
-
-sanity_rho <- cor(sanity_check$norm_standalone, sanity_check$norm_production,
-                  method = "spearman", use = "pairwise.complete.obs")
-
-cat("Standalone CMCC-excluded reimplementation vs. production new_exposure, Spearman rho:",
-    round(sanity_rho, 4), "(n =", nrow(sanity_check), ", expected ~1.0)\n")
-```
-
-## All 4 models vs. CMCC-excluded: norm and rank, side by side
-
-```{r}
-all4_sf <- water_supplies %>%
-  select(wsd_source_id) %>%
-  inner_join(all4_exposure, by = "wsd_source_id") %>%
-  filter(!is.na(norm_surge_pct_change_max))
-
-nocmcc_sf <- water_supplies %>%
-  select(wsd_source_id) %>%
-  inner_join(no_cmcc_exposure, by = "wsd_source_id") %>%
-  filter(!is.na(norm_surge_pct_change_max))
-
-all4_popup <- leafpop::popupTable(st_drop_geometry(all4_sf) %>%
-                                     select(wsd_source_id, park_name,
-                                            raw_surge_pct_change_max,
-                                            norm_surge_pct_change_max,
-                                            rank_surge_pct_change_max))
-
-nocmcc_popup <- leafpop::popupTable(st_drop_geometry(nocmcc_sf) %>%
-                                       select(wsd_source_id, park_name,
-                                              raw_surge_pct_change_max,
-                                              norm_surge_pct_change_max,
-                                              rank_surge_pct_change_max))
-
-m_all4_norm <- mapview(all4_sf, zcol = "norm_surge_pct_change_max", col.regions = pal,
-                       layer.name = "4-model, norm", popup = all4_popup)
-
-m_nocmcc_norm <- mapview(nocmcc_sf, zcol = "norm_surge_pct_change_max", col.regions = pal,
-                         layer.name = "CMCC-excluded, norm", popup = nocmcc_popup)
-
-m_all4_rank <- mapview(all4_sf, zcol = "rank_surge_pct_change_max", col.regions = pal,
-                       layer.name = "4-model, rank", popup = all4_popup)
-
-m_nocmcc_rank <- mapview(nocmcc_sf, zcol = "rank_surge_pct_change_max", col.regions = pal,
-                         layer.name = "CMCC-excluded, rank", popup = nocmcc_popup)
-
-leafsync::sync(m_all4_norm, m_nocmcc_norm, m_all4_rank, m_nocmcc_rank, ncol = 2)
-```
-
-## All 4 models vs. CMCC-excluded: rank movement
-
-```{r}
-rank_compare_cmcc <- all4_exposure %>%
-  select(wsd_source_id, park_unit, park_name, rank_all4 = rank_surge_pct_change_max) %>%
-  inner_join(
-    no_cmcc_exposure %>% select(wsd_source_id, rank_nocmcc = rank_surge_pct_change_max),
-    by = "wsd_source_id"
-  ) %>%
-  filter(!is.na(rank_all4), !is.na(rank_nocmcc))
-
-rank_slopegraph(rank_compare_cmcc, rank_all4, rank_nocmcc,
-                "All 4 models", "CMCC excluded",
-                "Storm surge exposure percentile rank: all 4 models vs. CMCC-CM2-VHR4 excluded")
-```
-
-Excluding CMCC-CM2-VHR4 changes which model wins worst-case at a station, not
-whether the station has a valid value, so coverage is identical under both.
-The sites that drop are the ones where CMCC was winning worst-case on a large
-relative jump, concentrated on the Pacific coast. The standalone
-reimplementation here and production's own output agree almost exactly (see the
-sanity check above).
+CMCC-CM2-VHR4 is dropped from the worst-case pool on the strength of this
+percent-change distribution alone. The ranking effect of dropping it is not
+re-mapped here: the previous exposure output in "Updated storm surge exposure"
+above kept all 4 models, so the previous-vs-current maps and rank-movement
+slopegraph already carry the before/after of the exclusion (bundled with the
+RP100-to-RP10 and weighting changes). Point Reyes on the Pacific and Cape Cod
+(CACO) on the Atlantic are the clearest movers there, and in both cases
+CMCC-CM2-VHR4 is the only model of the four projecting a meaningful increase
+at the nearest stations.
 
 # Worst-case vs. averaging
 
@@ -625,9 +536,9 @@ coastal_join <- new_exposure %>%
            by = "wsd_source_id") %>%
   left_join(swi_exposure %>% select(wsd_source_id, swi_exp = norm_swi_migration),
            by = "wsd_source_id") %>%
-  left_join(inundation_exposure %>% select(wsd_source_id, inundation_exp = norm_coverage_pct_proj),
-           by = "wsd_source_id") %>%
-  left_join(inundation_sensitivity %>% select(wsd_source_id, inundation_sen = norm_shore_dist_m),
+  left_join(inundation_exposure %>% select(wsd_source_id,
+                                           inundation_exp = norm_coverage_pct_proj,
+                                           inundation_sen = norm_coverage_pct_ref),
            by = "wsd_source_id")
 ```
 
@@ -672,16 +583,18 @@ p <- ggplot(sen_pairs, aes(storm_surge_sen, inundation_sen,
   theme_minimal(base_size = 11) +
   labs(title = paste0("Storm surge sensitivity vs. inundation sensitivity (n = ", nrow(sen_pairs),
                       ", Spearman rho = ", round(sen_rho, 3), ")"),
-       x = "Storm surge sensitivity (norm)", y = "Inundation sensitivity: shore distance (norm)")
+       x = "Storm surge sensitivity (norm)", y = "SLR inundation sensitivity: % area inundated (norm)")
 
 plotly::ggplotly(p, tooltip = "text")
 ```
 
 Only two present-day coastal sensitivity indicators currently exist: storm
-surge reference-period surge height, and inundation sensitivity's
-distance-to-shore. So this is a single pairwise comparison rather than a
-matrix. Both are proxies for how coastal a site is, in different ways.
-`inundation_sen` is a direct distance measurement. `storm_surge_sen` is a
+surge reference-period surge height, and SLR-inundation sensitivity, which is
+the percent of the water supply's 4 km buffer already inundated at the
+reference tide level (`raw_coverage_pct_ref` from `calc_inundation_exposure`,
+the same value the app uses for `sen_inundation_current` / `factor_sen_slr`).
+So this is a single pairwise comparison rather than a matrix. `inundation_sen`
+is a present-day inundated-area fraction; `storm_surge_sen` is a
 distance-and-elevation-weighted surge magnitude. A positive correlation here
 is expected on construction grounds, not necessarily evidence of redundancy.
 
