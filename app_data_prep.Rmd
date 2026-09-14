@@ -1,0 +1,442 @@
+---
+title: "App Data Prep for WSVA Tool (Rapid App)"
+author: "Caitlin Mothes"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+    code_folding: show
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+knitr::opts_knit$set(root.dir = here::here())
+
+source(here::here("setup.R"))
+
+options(tigris_use_cache = TRUE)
+```
+
+# Overview
+
+This file is the single place where **all** datasets consumed by the rapid app
+are prepped and written. Every object written here lands in `rapid_app/app_data/`.
+
+| Output | Contents |
+|-------------------------|-----------------------------------------------|
+| `final_indicators.csv` | One row per water supply, one column per indicator (raw values) |
+| `water_supplies.csv` | Water supply attributes + state water rights doctrine |
+| `wbm_data.gpkg` | LOCA2 climate change summary, spatialized |
+| `municipal_hauled.gpkg` | Municipal / hauled / tribal / purchased supplies |
+
+Indicator values are written as **raw** (un-normalized) values. The app
+re-normalizes and aggregates them on the fly via `calc_vulnerability_index()`,
+so normalization must stay out of this file.
+
+**Index hierarchy (calculated in the app, not here):** Indicators to Vulnerability
+Factors to Components (Exposure / Sensitivity) to Total Vulnerability Index,
+following the Euclidean distance framework of
+[Michalak et al. (2021)](https://irma.nps.gov/DataStore/Reference/Profile/2287636).
+
+# 0. Paths and helpers
+
+```{r paths-helpers}
+# All paths are relative to project root (set in the setup chunk)
+dir_out <- "data/rapid/outputs"   # date-stamped indicator outputs
+dir_app <- "rapid_app/app_data"   # what the app reads
+dir_int <- "data/rapid"           # intermediate / archive products
+
+dir.create(dir_app, recursive = TRUE, showWarnings = FALSE)
+
+
+#' Most recent date-stamped file for a given stem
+#'
+#' Matches `<stem>_YYYY-MM-DD.<ext>` anchored at both ends, so files with extra
+#' leading or trailing text (e.g. `kw_runoff_exposure_...`,
+#' `..._moderate_...`) are excluded automatically.
+#'
+#' @param stem file name stem, e.g. "runoff_exposure"
+#' @param dir directory to search
+#' @param ext file extension, without the dot
+#' @return full path to the most recent match, or NA_character_ if none
+latest_file <- function(stem, dir = dir_out, ext = "csv") {
+  files <- list.files(
+    dir,
+    pattern = paste0("^", stem, "_\\d{4}-\\d{2}-\\d{2}\\.", ext, "$"),
+    full.names = TRUE
+  )
+  if (length(files) == 0) return(NA_character_)
+  dates <- as.Date(str_extract(basename(files), "\\d{4}-\\d{2}-\\d{2}"))
+  files[which.max(dates)]
+}
+```
+
+# 1. Indicator registry
+
+**This tibble is the only place to edit when an indicator is added, renamed, or
+retired.** Everything downstream (which files get read, which columns get kept,
+what they are called in the app, and the column order of
+`final_indicators.csv`) is derived from it.
+
+To add a new indicator:
+
+1.  Add a row below with the app-facing name, the raw column name in the output
+    file, and the file stem.
+2.  Knit. The validation chunk reports anything that did not land.
+3.  Add a matching row to `rapid_app/app_data/indicator_details.csv` (label,
+    description, direction, status) and to `indicator_config` in `app.R`.
+
+Conventions:
+
+-   `app_name` prefix is `exp_` (Exposure) or `sen_` (Sensitivity).
+-   `source_col` is always a `raw_` column. Do not register `norm_` columns.
+-   Model-agreement columns must be **fraction scale (0-1)**, not percent, or
+    they will swamp the amount indicators during aggregation.
+-   For multi-metric outputs, pick the percentile that is most vulnerable:
+    `p10` for runoff / precip / SWE / drought (largest decrease), `p90` for
+    everything else (largest increase).
+
+```{r indicator-registry}
+indicator_registry <- tribble(
+  ~app_name,                              ~source_col,                                    ~file_stem,                            ~component,    ~factor,
+
+  # ---- EXPOSURE ------------------------------------------------------------
+  # Runoff
+  "exp_runoff_change",                    "raw_runoff_change_p10",                        "runoff_exposure",                     "Exposure",    "Runoff",
+  "exp_runoff_model_agree",               "raw_runoff_models_showing_decrease",           "runoff_exposure",                     "Exposure",    "Runoff",
+  "exp_runoff_timing_change",             "raw_runoff_timing_change_magnitude",           "runoff_timing_exposure",              "Exposure",    "Timing",
+  "exp_runoff_timing_change_model_agree", "raw_runoff_timing_direction_agreement_fraction","runoff_timing_exposure",             "Exposure",    "Timing",
+
+  # Precipitation
+  "exp_precip_change",                    "raw_precipitation_change_p10",                 "precipitation_exposure",              "Exposure",    "Precipitation",
+  "exp_precip_model_agree",               "raw_precip_models_showing_decrease",           "precipitation_exposure",              "Exposure",    "Precipitation",
+  "exp_precip_timing_change",             "raw_precip_timing_change_magnitude",           "precip_timing_exposure",              "Exposure",    "Timing",
+  "exp_precip_timing_change_model_agree", "raw_precip_timing_direction_agreement_fraction","precip_timing_exposure",             "Exposure",    "Timing",
+
+  # Temperature
+  "exp_temp_change",                      "raw_temperature_change_p90",                   "temperature_exposure",                "Exposure",    "Temperature",
+
+  # Drought (negative SPEI change = drier = more vulnerable)
+  "exp_drought_change",                   "raw_spei_change_p10",                          "drought_exposure",                    "Exposure",    "Drought",
+  "exp_drought_model_agree",              "raw_spei_models_showing_decrease",             "drought_exposure",                    "Exposure",    "Drought",
+
+  # Sea level rise
+  "exp_inundation_slr",                   "raw_pct_point_change",                         "inundation_exposure",                 "Exposure",    "Sea Level Rise",
+  "exp_swi",                              "raw_swi_migration",                            "swi_exposure",                        "Exposure",    "Sea Level Rise",
+  "exp_storm_surge",                      "raw_surge_change_max",                         "storm_surge_exposure",                "Exposure",    "Sea Level Rise",
+
+  # Fire
+  "exp_fire_prob_change",                 "raw_fire_prob_change_p90",                     "fire_exposure",                       "Exposure",    "Wildfire",
+  "exp_fire_model_agree",                 "raw_fire_models_showing_increase",             "fire_exposure",                       "Exposure",    "Wildfire",
+
+  # Demand
+  "exp_nearby_use_change",                "raw_use_change_p90",                           "nearby_use_exposure",                 "Exposure",    "Demand",
+  "exp_nearby_use_model_agree",           "raw_models_showing_increase_pct",              "nearby_use_exposure",                 "Exposure",    "Demand",
+  "exp_auc_change",                       "raw_timing_change_p90",                        "timing_mismatch_exposure_Pred_High",  "Exposure",    "Demand",
+
+  # ---- SENSITIVITY ---------------------------------------------------------
+  # Demand
+  "sen_visitation_trend",                 "raw_scaled_trend_visitation",                  "visitation_sensitivity",              "Sensitivity", "Demand",
+  "sen_competition",                      "raw_slope_nearby_use_per_km2",                 "nearby_use_sensitivity",              "Sensitivity", "Demand",
+  "sen_auc_change",                       "raw_timing_mismatch_auc",                      "timing_mismatch_sensitivity",         "Sensitivity", "Demand",
+
+  # Infrastructure
+  "sen_source_type",                      "raw_groundwater_depth_m",                      "groundwater_depth_sensitivity",       "Sensitivity", "Infrastructure",
+
+  # Hydro-climate trends
+  "sen_runoff_trend",                     "raw_slope_runoff",                             "runoff_sensitivity",                  "Sensitivity", "Runoff",
+  "sen_precip_trend",                     "raw_slope_precip",                             "precip_sensitivity",                  "Sensitivity", "Precipitation",
+  "sen_drought_trend",                    "raw_slope_spei",                               "drought_sensitivity",                 "Sensitivity", "Drought",
+  "sen_temp_trend",                       "raw_slope_temperature",                        "temperature_sensitivity",             "Sensitivity", "Temperature",
+
+  # Hazards
+  "sen_wildfire_hazard",                  "raw_wildfire_hazard_mean",                     "fire_sensitivity",                    "Sensitivity", "Wildfire",
+  "sen_flood_risk",                       "raw_flood_risk_percent",                       "flood_sensitivity",                   "Sensitivity", "Flood",
+  "sen_inundation_current",               "raw_coverage_pct_ref",                         "inundation_exposure",              "Sensitivity", "Sea Level Rise"
+
+  # ---- NOT YET WIRED (uncomment when the output exists) --------------------
+  # NOTE: add a trailing comma to the row above before uncommenting any of these
+  # "exp_swe_change",       "raw_swe_change_p10",             "swe_exposure",    "Exposure", "Snowpack",
+  # "exp_swe_model_agree",  "raw_swe_models_showing_decrease","swe_exposure",    "Exposure", "Snowpack",
+  # "exp_flood_change",     "raw_flood_change_p90",           "flood_exposure",  "Exposure", "Flood",
+)
+
+# Guard against copy-paste duplicates in the registry itself
+stopifnot(
+  !anyDuplicated(indicator_registry$app_name),
+  !anyDuplicated(indicator_registry$source_col)
+)
+
+count(indicator_registry, component, factor)
+```
+
+# 2. Assemble indicators
+
+Read the most recent output file for every stem in the registry, keep only the
+registered raw columns, and full-join on `wsd_source_id`.
+
+Each file is de-duplicated to one row per `wsd_source_id` **before** joining, so
+a duplicated row in any single output cannot fan out the joined table.
+
+```{r read-indicator-files}
+indicator_files <- tibble(file_stem = unique(indicator_registry$file_stem)) |>
+  mutate(file = map_chr(file_stem, latest_file))
+
+# Report (do not silently drop) stems with no matching output file
+missing_files <- filter(indicator_files, is.na(file))
+if (nrow(missing_files) > 0) {
+  warning("No date-stamped file found for: ",
+          paste(missing_files$file_stem, collapse = ", "), call. = FALSE)
+}
+
+indicator_files <- filter(indicator_files, !is.na(file))
+
+# Which file / date each indicator is coming from this run
+indicator_files |>
+  mutate(file_date = str_extract(basename(file), "\\d{4}-\\d{2}-\\d{2}")) |>
+  select(file_stem, file_date) |>
+  arrange(file_stem) |>
+  print(n = Inf)
+```
+
+```{r assemble-indicators}
+wanted_cols <- indicator_registry$source_col
+
+indicator_list <- indicator_files$file |>
+  set_names(indicator_files$file_stem) |>
+  map(\(f) {
+    read_csv(f, show_col_types = FALSE) |>
+      select(wsd_source_id, any_of(wanted_cols)) |>
+      distinct(wsd_source_id, .keep_all = TRUE)
+  })
+
+# Fail loudly on cross-file column collisions rather than getting silent .x/.y
+col_map <- imap(
+  indicator_list,
+  \(df, nm) tibble(file_stem = nm, source_col = setdiff(names(df), "wsd_source_id"))
+) |>
+  list_rbind()
+
+collisions <- col_map |> count(source_col) |> filter(n > 1)
+if (nrow(collisions) > 0) {
+  stop("Same raw column supplied by more than one file: ",
+       paste(collisions$source_col, collapse = ", "),
+       ". Rename it upstream in the calc_* script.", call. = FALSE)
+}
+
+indicators_assembled <- reduce(indicator_list, full_join, by = "wsd_source_id")
+
+dim(indicators_assembled)
+```
+
+## Validation
+
+```{r validate-registry}
+# Registry rows that never landed: bad stem, bad column name, or missing file
+not_found <- indicator_registry |>
+  filter(!source_col %in% names(indicators_assembled)) |>
+  select(app_name, source_col, file_stem)
+
+if (nrow(not_found) > 0) {
+  warning(nrow(not_found), " registered indicator(s) not found in any output file.",
+          call. = FALSE)
+  print(not_found)
+} else {
+  cat("All", nrow(indicator_registry), "registered indicators found.\n")
+}
+
+# Confirm the file each column actually came from matches the registry
+mismatched_stems <- indicator_registry |>
+  inner_join(col_map, by = "source_col", suffix = c("_registry", "_actual")) |>
+  filter(file_stem_registry != file_stem_actual) |>
+  select(app_name, source_col, file_stem_registry, file_stem_actual)
+
+if (nrow(mismatched_stems) > 0) {
+  message("Registry `file_stem` is out of date for these rows (values are still correct):")
+  print(mismatched_stems)
+}
+```
+
+```{r write-assembled}
+# Archive copy of the joined raw values, pre-rename
+write_csv(indicators_assembled, file.path(dir_int, "indicators_assembled.csv"))
+```
+
+# 3. Indicator table for the app
+
+Rename to app-facing names and order columns by the registry. One row per water
+supply system.
+
+```{r indicators-clean}
+registry_present <- filter(indicator_registry, source_col %in% names(indicators_assembled))
+
+indicators_clean <- indicators_assembled |>
+  select(wsd_source_id, all_of(set_names(registry_present$source_col, registry_present$app_name))) |>
+  distinct(wsd_source_id, .keep_all = TRUE)
+
+dim(indicators_clean)
+```
+
+## Coverage check
+
+```{r indicator-coverage}
+# Non-missing count per indicator. A count far below the others usually means a
+# genuine data gap, not a bug, but it is worth confirming before the app ingests it.
+indicators_clean |>
+  summarise(across(-wsd_source_id, ~ sum(!is.na(.x)))) |>
+  pivot_longer(everything(), names_to = "app_name", values_to = "n_valid") |>
+  mutate(pct_valid = round(100 * n_valid / nrow(indicators_clean), 1)) |>
+  left_join(select(indicator_registry, app_name, component, factor), by = "app_name") |>
+  arrange(n_valid) |>
+  print(n = Inf)
+
+# Completeness per supply: how many indicators each site actually contributes.
+# NOTE: `na.rm = TRUE` in the app's rowSums() makes a missing indicator and an
+# explicit zero mechanically identical, so sites low on this histogram score
+# systematically lower. Accepted methodological choice, flagged here for QA.
+indicators_clean |>
+  mutate(n_indicators = rowSums(!is.na(across(-wsd_source_id)))) |>
+  count(n_indicators) |>
+  arrange(desc(n_indicators)) |>
+  print(n = Inf)
+```
+
+```{r write-indicators}
+write_csv(indicators_clean, file.path(dir_app, "final_indicators.csv"))
+```
+
+# 4. Water supplies
+
+Built here, written at the end of section 5 once the state water rights
+attributes have been attached. This is the only write of `water_supplies.csv`.
+
+```{r water-supplies}
+water_supplies <- get_wsd(rapid = TRUE) |>
+  # some WSDs have NA source_state; fall back to the park-level `state` column
+  mutate(source_state = if_else(is.na(source_state), state, source_state)) |>
+  distinct(wsd_source_id, .keep_all = TRUE)
+
+dim(water_supplies)
+```
+
+# 5. State water rights doctrine
+
+Pulled from `explore_WaterRights_vulnerability.Rmd` (Parts 2a and 3). State
+surface water and groundwater appropriation doctrines are joined to each supply
+by `source_state` and carried as **descriptive** attributes only. They are not
+scored or ranked, and they are not indicators.
+
+The workbook covers CONUS only, so supplies in AK, HI, and the territories will
+have `NA` doctrine fields by design.
+
+> **DISCLAIMER (surface as-is in the app):** *The state water rights information
+> is intended for general informational purposes only and should not be used as
+> an alternative to seeking expert legal advice where necessary. Consult the
+> state-specific State Engineer's Office and/or the applicable water resources
+> governing body for any legal questions or advice related to water rights
+> administration.*
+
+```{r water-rights-state}
+water_law <- read_excel("data/all/CONUS States_SW-GW_WaterManagement.xlsx",
+                        sheet = "List") |>
+  rename(state_name = State)
+
+# Crosswalk state name (used by the workbook) to postal code (used by the WSD)
+state_xwalk <- tigris::states(progress_bar = FALSE) |>
+  st_drop_geometry() |>
+  select(source_state = STUSPS, state_name = NAME)
+
+water_rights_state <- state_xwalk |>
+  inner_join(water_law, by = "state_name") |>
+  select(source_state, state_name, SurfaceWaterLaw, GroundWaterLaw,
+         any_of("LegalFrameworkRef"))
+
+# Any state in the workbook that failed to match a postal code
+setdiff(water_law$state_name, water_rights_state$state_name)
+```
+
+```{r join-water-rights}
+wr_cols <- setdiff(names(water_rights_state), "source_state")
+
+water_supplies <- water_supplies |>
+  select(-any_of(wr_cols)) |>   # keeps the chunk idempotent on re-run
+  left_join(water_rights_state, by = "source_state")
+
+# Supplies with no doctrine attached (expect AK / HI / territories only)
+water_supplies |>
+  filter(is.na(SurfaceWaterLaw)) |>
+  count(source_state, sort = TRUE)
+```
+
+```{r write-water-supplies}
+write_csv(water_supplies, file.path(dir_app, "water_supplies.csv"))
+```
+
+# 6. WBM / LOCA2 climate summary
+
+```{r wbm-data}
+wbm_file <- latest_file("loca2_climate_change_summary")
+stopifnot(!is.na(wbm_file))
+cat("Reading:", basename(wbm_file), "\n")
+
+wbm_data <- read_csv(wbm_file, show_col_types = FALSE)
+
+# Supply attributes to carry onto the spatial layer
+supply_attrs <- water_supplies |>
+  select(any_of(c("wsd_source_id", "park_unit", "park_name", "region",
+                  "source_state", "water_system_name", "system_type",
+                  "source_type", "source_longitude", "source_latitude")))
+
+wbm_sf <- wbm_data |>
+  # drop any duplicated attribute columns so the join cannot produce .x/.y
+  select(-any_of(setdiff(names(supply_attrs), "wsd_source_id"))) |>
+  left_join(supply_attrs, by = "wsd_source_id") |>
+  filter(!is.na(source_longitude), !is.na(source_latitude)) |>
+  st_as_sf(coords = c("source_longitude", "source_latitude"),
+           crs = 4326, remove = FALSE)
+
+# Rows that could not be located (no match in the WSD, or missing coordinates)
+cat("WBM rows:", nrow(wbm_data),
+    "| located:", nrow(wbm_sf),
+    "| unique supplies:", n_distinct(wbm_sf$wsd_source_id), "\n")
+
+st_write(wbm_sf, file.path(dir_app, "wbm_data.gpkg"),
+         delete_dsn = TRUE, quiet = TRUE)
+```
+
+# 7. Municipal / hauled supplies
+
+Full WSD (not the rapid subset), since these system types are excluded from the
+scored set but still shown on the map.
+
+```{r municipal-hauled}
+municipal_hauled <- get_wsd() |>
+  filter(str_detect(source_type,
+                    regex("municipal|hauled|tribal|purchased", ignore_case = TRUE))) |>
+  distinct(wsd_source_id, .keep_all = TRUE) |>
+  filter(!is.na(source_longitude), !is.na(source_latitude)) |>
+  st_as_sf(coords = c("source_longitude", "source_latitude"),
+           crs = 4326, remove = FALSE)
+
+st_write(municipal_hauled, file.path(dir_app, "municipal_hauled.gpkg"),
+         delete_dsn = TRUE, quiet = TRUE)
+
+nrow(municipal_hauled)
+```
+
+# 8. Session info
+
+```{r session-info}
+sessionInfo()
+```
+
+# Reference
+
+**Framework:** Michalak, J.L., Lawler, J.J., Gross, J.E. & Littlefield, C.E.
+(2021). *A Strategic Analysis of Climate Vulnerability of National Park
+Resources and Values.* NPS Natural Resource Report NPS/NRSS/CCRP/NRR-2021/2293.
+
+**Water rights:** derived from `explore_WaterRights_vulnerability.Rmd`
+(C.V. Chinnasamy), Parts 2a and 3.
