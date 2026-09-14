@@ -261,6 +261,31 @@ temp_exp <- calc_temp_exposure(water_supplies,
                                          verbose = TRUE)
 ```
 
+## Water Rights
+Water Rights exposure in the 21st century.
+
+  Options to choose :
+    1) "2030" - Early-century exposure
+    2) "2050" - Mid-century exposure
+    3) "2080" - Late-century exposure
+  
+
+```{r}
+waterrights_exp <- calc_waterrights_exposure(
+  water_supplies,
+  stress_data = here("data",
+                     "rapid",
+                     "inputs",
+                     "WaterRightsIndicator",
+                     "waterrights_stress_long.csv"),
+  period = "2050",    #Options - "2030", "2050", or "2080"
+  save = TRUE,
+  output_dir = "data/rapid/outputs/",
+  verbose = TRUE)
+```
+
+
+
 # Sensitivity
 
 ## Fire
@@ -427,6 +452,24 @@ groundwater_depth_sen <- calc_groundwater_depth_sensitivity(
   verbose          = TRUE
 )
 ```
+
+
+## Water Rights
+Water Rights sensitivity ......
+
+```{r}
+waterrights_sen <- calc_waterrights_sensitivity(
+  water_supplies,
+  stress_data = here("data",
+                     "rapid",
+                     "inputs",
+                     "WaterRightsIndicator",
+                     "waterrights_stress_long.csv"),
+    save = TRUE,
+    output_dir = "data/rapid/outputs/",
+    verbose = TRUE)
+```
+
 
 ## Storm Surge
 
