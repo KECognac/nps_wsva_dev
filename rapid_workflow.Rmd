@@ -147,8 +147,6 @@ precip_time_exp <- calc_precip_timing_exposure(water_supplies,
                                                verbose = TRUE)
 ```
 
-
-
 ### Snow Water Equivalent (SWE)
 
 ```{r}
@@ -171,7 +169,7 @@ swe_exp <- calc_swe_exposure(water_supplies = water_supplies,
 drought_exp <- calc_drought_exposure(water_supplies,
                                      drought_data = "data/rapid/inputs/loca2_drought_monthly_1980-2010_2035-2065_hindcast-TRUE.parquet",
                                      spei_scale = 12,
-                                     spei_inf_cap = 4,
+                                     spei_inf_cap = 3,
                                      historical = c(1980, 2010),
                                      future = c(2035, 2065),
                                      water_year = TRUE,
@@ -249,16 +247,41 @@ nearby_use_exposure <- calc_nearby_use_exposure(water_supplies,
 
 ## Water Quality
 
+### Consecutive Dry and Wet Periods
+
+These indicators represent the paired precipitation-regime signal proposed for
+water quality: lengthening dry spells (CDD) and shortening wet spells (CWD).
+Exposure is scored from the percent change between historical and future mean
+spell length; absolute change in days is retained as supporting information.
+
+```{r}
+dry_period_exp <- calc_dry_period_exposure(water_supplies = water_supplies,
+                                           period_data = "data/rapid/inputs/loca_cmip6_precip_periods_water_supplies/",
+                                           historical = c(1980, 2010),
+                                           future = c(2035, 2065),
+                                           save = TRUE,
+                                           output_dir = "data/rapid/outputs/",
+                                           verbose = TRUE)
+
+wet_period_exp <- calc_wet_period_exposure(water_supplies = water_supplies,
+                                           period_data = "data/rapid/inputs/loca_cmip6_precip_periods_water_supplies/",
+                                           historical = c(1980, 2010),
+                                           future = c(2035, 2065),
+                                           save = TRUE,
+                                           output_dir = "data/rapid/outputs/",
+                                           verbose = TRUE)
+```
+
 ```{r}
 temp_exp <- calc_temp_exposure(water_supplies,
-                                         temp_data = "data/rapid/inputs/loca2_temperature_water_supplies/",
-                                         hindcast = TRUE,
-                                         historical = c(1980, 2010),
-                                         future = c(2035, 2065),
-                                         water_year = TRUE,
-                                         save = TRUE,
-                                         output_dir = "data/rapid/outputs/",
-                                         verbose = TRUE)
+                               temp_data = "data/rapid/inputs/loca2_temperature_water_supplies/",
+                               hindcast = TRUE,
+                               historical = c(1980, 2010),
+                               future = c(2035, 2065),
+                               water_year = TRUE,
+                               save = TRUE,
+                               output_dir = "data/rapid/outputs/",
+                               verbose = TRUE)
 ```
 
 ## Water Rights
@@ -378,7 +401,7 @@ calc_drought_sensitivity(water_supplies,
                          precip_data = "data/rapid/inputs/loca2_precipitation_water_supplies/",
                          pet_data = "data/rapid/inputs/loca2_pet_water_supplies/",
                          spei_scale = 12,
-                         spei_inf_cap = 4,
+                         spei_inf_cap = 3,
                          drought_threshold = -1,
                          historical = c(1980, 2010),
                          water_year = TRUE,
@@ -397,6 +420,30 @@ temp_sen <- calc_temp_sensitivity(water_supplies,
                                   save = TRUE,
                                   output_dir = "data/rapid/outputs/",
                                   verbose = TRUE)
+```
+
+### Consecutive Dry and Wet Periods
+
+Historical CDD and CWD sensitivity uses Sen's slope for each historical LOCA2
+model. Each slope is divided by that model's historical mean spell length and
+expressed as percent change per year before summarizing the model distribution
+and direction agreement at each water supply. Absolute slopes in days per year
+are retained as supporting information.
+
+```{r}
+dry_period_sen <- calc_dry_period_sensitivity(water_supplies = water_supplies,
+                                              period_data = "data/rapid/inputs/loca_cmip6_precip_periods_water_supplies/",
+                                              historical = c(1980, 2010),
+                                              save = TRUE,
+                                              output_dir = "data/rapid/outputs/",
+                                              verbose = TRUE)
+
+wet_period_sen <- calc_wet_period_sensitivity(water_supplies = water_supplies,
+                                              period_data = "data/rapid/inputs/loca_cmip6_precip_periods_water_supplies/",
+                                              historical = c(1980, 2010),
+                                              save = TRUE,
+                                              output_dir = "data/rapid/outputs/",
+                                              verbose = TRUE)
 ```
 
 
@@ -422,8 +469,8 @@ nearby_use_sen <- calc_nearby_use_sensitivity(water_supplies,
 
 ```{r}
 visitation_sen <- calc_visitation_sensitivity(water_supplies,
-                                              start_year = 1990,
-                                              end_year = 2024,
+                                              start_year = 1980,
+                                              end_year = 2025,
                                               save = TRUE,
                                               output_dir = "data/rapid/outputs/",
                                               verbose = TRUE) %>%
@@ -453,6 +500,7 @@ groundwater_depth_sen <- calc_groundwater_depth_sensitivity(
 )
 ```
 
+# MWBM Explorer
 
 ## Water Rights
 Water Rights sensitivity ......
@@ -487,71 +535,9 @@ storm_surge_sen <- calc_storm_surge_sensitivity(water_supplies = water_supplies,
 Filter to Utah parks for testing
 
 ```{r}
-# park boundaries and metadata
-parks_sub <- st_read("data/rapid/inputs/park_boundaries_2025-08-14.gpkg") %>% filter(STATE == "UT")
-
-
-# park water supplies
-table_path <- "data/Water_Supply_Systems/NPS_Water_Systems_Database_Joined.xlsx"
-
-
-water_supplies_sub <- read_excel(table_path,
-                                 sheet = 1,
-                                 na = c("NA", "U"),
-                                 skip = 1) %>%
-  dplyr::mutate(
-    source_longitude = as.numeric(source_longitude),
-    source_latitude = as.numeric(source_latitude)
-  ) %>%
-  filter(park_unit %in% parks_sub$UNIT_CODE) %>%
-  filter(!source_type %in% c("Municipal", "Hauled", "municipal", "hauled")) %>%
-  drop_na(source_longitude, source_latitude) %>%
-  st_as_sf(coords = (c("source_longitude", "source_latitude")),
-           crs = 4326,
-           remove = FALSE)
-
-water_supplies_sub_buffer <- water_supplies_sub %>% 
-  st_transform(crs = 32616) %>% 
-  st_buffer(dist = 5000)
+climate_summary <- calc_loca2_change_summary(water_supplies = water_supplies,
+                                             hindcast = TRUE,
+                                             save = TRUE,
+                                             output_dir = "data/rapid/outputs/")
 ```
 
-### Fire Exposure
-
-Run indicator:
-
-```{r}
-# read in files
-pyromes <- st_read("data/rapid/inputs/pyromes.gpkg")
-
-pyromes_selected <- read_csv("data/rapid/inputs/pyromes_selected.csv")
-
-# Calculate indicator
-fire_exp <- calc_fire_exposure(
-  water_supplies = st_filter(water_supplies_sub, pyromes),
-  fire_prob_data = pyromes_selected,
-  pyrome_data = pyromes,
-  save = FALSE
-)
-
-# using terra filter method went form 1.2 minutes to 3 seconds
-```
-
-### Fire Sensitivity
-
-```{r}
-# Calculate categorical indicator
-fire_sen <- calc_fire_sensitivity(
-  water_supplies = water_supplies_sub_buffer,
-  whp_raster = "data/all/usfs_fire/whp2023_GeoTIF/whp2023_cls_conus.tif",
-  whp_type = "cat",
-  save = FALSE
-)
-```
-
-### Runoff Exposure
-
-```{r}
-runoff_exp <- calc_runoff_exposure(water_supplies = water_supplies_sub)
-
-# 2.27 mins
-```
