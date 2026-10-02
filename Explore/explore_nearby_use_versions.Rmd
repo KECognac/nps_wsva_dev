@@ -4,8 +4,10 @@ output: html_document
 ---
 
 ```{r setup, include=FALSE}
-source("setup.R")
-source("src/get_nps_basemap.R")
+# Run from the project root regardless of RStudio's knit-directory setting.
+knitr::opts_knit$set(root.dir = here::here())
+source(here::here("setup.R"), chdir = TRUE)
+source(here::here("src/get_nps_basemap.R"))
 knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE,
                       fig.width = 7, fig.height = 5, dpi = 150)
 theme_set(theme_minimal(base_size = 12))
@@ -55,7 +57,8 @@ future <- data.table::fread("data/all/RPAWaterDemand/2_Demand_Results/cons_and_w
 old <- calc_nearby_use_exposure_old(water_supplies, observed, future, verbose = FALSE) %>%
   st_drop_geometry() %>%
   transmute(wsd_source_id, fips = if_else(is.na(fips), NA_character_, sprintf("%05d", as.integer(fips))),
-            p90 = norm_absolute_use_change_p90, data_status = NA_character_)
+            p90 = norm_absolute_use_change_p90, raw_p90 = raw_absolute_use_change_p90,
+            data_status = NA_character_)
 
 old_future_fips <- future %>% filter(between(yearr, 2035, 2065)) %>%
   distinct(fips) %>% pull(fips) %>% as.integer() %>% sprintf(fmt = "%05d")
@@ -63,7 +66,8 @@ old_future_fips <- future %>% filter(between(yearr, 2035, 2065)) %>%
 rm(future)
 
 new <- calc_nearby_use_exposure(water_supplies, verbose = FALSE) %>%
-  transmute(wsd_source_id, fips, p90 = norm_absolute_use_change_p90, data_status)
+  transmute(wsd_source_id, fips, p90 = norm_absolute_use_change_p90,
+            raw_p90 = raw_absolute_use_change_p90, data_status)
 
 new_future_fips <- data.table::fread(
   "data/Latest county-level data/water_demand_projections/pub_irr_monthly_avg_2040_2070.csv",
@@ -71,6 +75,14 @@ new_future_fips <- data.table::fread(
 
 pairs <- inner_join(old, new, by = "wsd_source_id", suffix = c("_old", "_new")) %>%
   filter(is.finite(p90_old), is.finite(p90_new))
+
+# Agreement between versions. Spearman is unaffected by min-max scaling.
+agreement <- list(
+  pearson = cor(pairs$p90_old, pairs$p90_new),
+  spearman = cor(pairs$p90_old, pairs$p90_new, method = "spearman"),
+  same_sign = mean(sign(pairs$raw_p90_old) == sign(pairs$raw_p90_new)),
+  old_range = range(pairs$raw_p90_old),
+  new_range = range(pairs$raw_p90_new))
 
 source("src/rapid/calc_wta_exposure.R")
 source("src/rapid/calc_waterrights_exposure.R")
@@ -96,11 +108,8 @@ wta_rights_map_data <- water_supplies %>%
   left_join(waterrights, by = "wsd_source_id")
 ```
 
-Some sites have missing data. For missing counties, it's the same set between the 
-new and old. But, the new dataset has some missing future data, making the 
-comparison between future and historical data ineffective. 
-```{r}
-# FIPS identifies counties, not postal ZIP codes. Retain other data gaps explicitly.
+```{r missing-sites, include=FALSE}
+# Classify why each supply has no result.
 missing_sites <- function(results, future_fips) {
   results %>%
     filter(!is.finite(p90)) %>%
@@ -110,11 +119,15 @@ missing_sites <- function(results, future_fips) {
               `Source ID` = wsd_source_id, `County FIPS` = fips,
               Gap = case_when(is.na(fips) ~ "No county FIPS match",
                               !fips %in% future_fips ~ "County absent from future file",
-                              !is.na(data_status) ~ data_status,
+                              !is.na(data_status) ~ str_to_sentence(gsub("_", " ", data_status)),
                               TRUE ~ "Unavailable result"))
 }
 missing_new <- missing_sites(new, new_future_fips)
 missing_old <- missing_sites(old, old_future_fips)
+
+missing_both <- missing_new %>% filter(`Source ID` %in% missing_old$`Source ID`)
+missing_new_only <- missing_new %>% filter(!`Source ID` %in% missing_old$`Source ID`)
+missing_old_only <- missing_old %>% filter(!`Source ID` %in% missing_new$`Source ID`)
 
 historical_new_fips <- data.table::fread(
   "data/Latest county-level data/water_demand_projections/pub_irr_monthly_avg_2000_2020.csv",
@@ -132,6 +145,22 @@ missing_counties <- tigris::counties(cb = FALSE, year = 2020, progress_bar = FAL
   mutate(FIPS = GEOID) %>%
   filter(FIPS %in% missing_county_fips$FIPS) %>%
   mutate(coverage = "Historical only")
+```
+
+### Supplies without results
+
+`r nrow(missing_new)` supplies have no new nearby-use exposure result and
+`r nrow(missing_old)` have no old result. `r nrow(missing_both)` are missing
+from both versions, in `r n_distinct(missing_both$"County FIPS")` counties whose
+codes are absent from the future file in both datasets. `r nrow(missing_new_only)`
+are missing only from the new version, in
+`r n_distinct(missing_new_only$"County FIPS")` counties with incomplete future
+thermoelectric plant records (a known plant has no projection, so the future
+total is unavailable rather than assumed zero). `r nrow(missing_old_only)` are
+missing only from the old version.
+
+```{r missing-sites-table}
+knitr::kable(missing_new)
 ```
 
 The plot and maps use `norm_absolute_use_change_p90`: signed withdrawal change
@@ -154,6 +183,17 @@ The updated nearby-use estimates differ because they use three withdrawal sector
 newer historical and future periods, and a different model/scenario ensemble than
 the six-sector USGS/RPA dataset.
 
+The two versions agree only weakly. Across the `r nrow(pairs)` supplies with
+both results, the rank (Spearman) correlation of P90 change is
+`r round(agreement$spearman, 2)`, and both versions show the same direction of
+change for `r scales::percent(agreement$same_sign)` of supplies. The Pearson
+correlation of the normalized scores is `r round(agreement$pearson, 2)`, pulled
+down by a few extreme old values: old raw P90 change ranges from
+`r signif(agreement$old_range[1], 2)` to `r signif(agreement$old_range[2], 2)`
+MGD/km2, versus `r signif(agreement$new_range[1], 2)` to
+`r signif(agreement$new_range[2], 2)` for the new version. Those extremes
+compress most old normalized scores into a narrow band in the plot above.
+
 The synchronized maps share the same 0–1 color scale.
 
 ```{r nearby-use-maps}
@@ -173,9 +213,16 @@ crosswalk problem during data preparation rather than a true absence of water
 use. Because the missing counties cannot be matched confidently across periods,
 their future changes are flagged as unavailable instead of being treated as zero.
 
-```{r}
-site_buf <- sites %>%
-  filter(wsd_source_id %in% missing_old$`Source ID`) %>%
+The first map shows every supply without a new result, colored by the reason,
+with county boundaries within 200 km. The second shows all historical counties
+absent from the new future projection file.
+
+```{r missing-sites-map}
+missing_site_points <- sites %>%
+  select(wsd_source_id) %>%
+  inner_join(select(missing_new, wsd_source_id = `Source ID`, Gap), by = "wsd_source_id")
+
+site_buf <- missing_site_points %>%
   st_transform(5070) %>%
   st_buffer(200000)
 
@@ -184,9 +231,9 @@ counties <- tigris::counties(cb = TRUE, progress_bar = FALSE) %>%
   filter(lengths(st_intersects(., site_buf)) > 0)
 
 add_nps_basemaps(
-  mapview(sites %>% filter(wsd_source_id %in% missing_old$`Source ID`),
+  mapview(missing_site_points, zcol = "Gap", layer.name = "Supplies without a new result",
           map.types = NULL) +
-    mapview(counties, map.types = NULL))
+    mapview(counties, layer.name = "Counties", alpha.regions = 0, map.types = NULL))
 ```
 
 ```{r missing-county-map}
