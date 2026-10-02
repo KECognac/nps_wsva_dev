@@ -238,11 +238,19 @@ swi_exp <- calc_swi_exposure(
 
 Data currently from USFS compilation of all USGS data use data by county:
 ```{r}
-nearby_use_exposure <- calc_nearby_use_exposure(water_supplies,
+nearby_use_exposure_old <- calc_nearby_use_exposure_old(water_supplies,
                                                 observed_use = fread("data/all/RPAWaterDemand/1_BaseData/Trash 2022/usgswithdrawals.csv"),
                                                 future_use = fread("data/all/RPAWaterDemand/2_Demand_Results/cons_and_withdrawal.csv"),
                                                 save = TRUE,
                                                 output_dir = "data/rapid/outputs/")
+
+nearby_use_exposure <- calc_nearby_use_exposure(water_supplies,
+                                                      verbose = TRUE,
+                                                      save = TRUE,
+                                                      output_dir = "data/rapid/outputs/")
+
+
+
 ```
 
 ## Water Quality
@@ -452,7 +460,7 @@ wet_period_sen <- calc_wet_period_sensitivity(water_supplies = water_supplies,
 Data currently from USFS compilation of all USGS data use data by county:
 
 ```{r}
-nearby_use_sen <- calc_nearby_use_sensitivity(water_supplies,
+nearby_use_sen_old <- calc_nearby_use_sensitivity_old(water_supplies,
                                               observed_use = fread("data/all/RPAWaterDemand/1_BaseData/Trash 2022/usgswithdrawals.csv"),
                                               save = TRUE,
                                               output_dir = "data/rapid/outputs/",
@@ -462,6 +470,20 @@ nearby_use_sen <- calc_nearby_use_sensitivity(water_supplies,
          raw_avg_nearby_use_per_km2, raw_percent_slope_nearby_use_per_km2, 
          rank_avg_nearby_use_per_km2, rank_percent_slope_nearby_use_per_km2, 
          norm_avg_nearby_use_per_km2, norm_percent_slope_nearby_use_per_km2)
+
+nearby_use_sen <- calc_nearby_use_sensitivity(water_supplies,
+                                                    data_dir = "data/Latest county-level data/",
+                                                    save = TRUE,
+                                                    output_dir = "data/rapid/outputs/",
+                                                    verbose = TRUE)
+
+# Historical HUC8 water-stress sensitivity
+wta_sen <- calc_wta_sensitivity(water_supplies,
+                                data_dir = "data/Latest county-level data/",
+                                huc_level = 8L,
+                                save = TRUE,
+                                output_dir = "data/rapid/outputs/",
+                                verbose = TRUE)
 
 ```
 
@@ -540,4 +562,3 @@ climate_summary <- calc_loca2_change_summary(water_supplies = water_supplies,
                                              save = TRUE,
                                              output_dir = "data/rapid/outputs/")
 ```
-
