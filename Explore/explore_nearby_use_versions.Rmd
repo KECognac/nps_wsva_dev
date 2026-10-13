@@ -213,6 +213,29 @@ crosswalk problem during data preparation rather than a true absence of water
 use. Because the missing counties cannot be matched confidently across periods,
 their future changes are flagged as unavailable instead of being treated as zero.
 
+```{r wta-coverage-gap, include=FALSE}
+# The same historical-vs-future coverage mismatch, at HUC8 in the WTA files.
+wta_dir <- "data/Latest county-level data/water_demand_projections"
+wta_hist_huc <- data.table::fread(file.path(wta_dir, "wta_ratios_2000_2020.csv"),
+                                  select = c("huc", "agg")) %>%
+  filter(agg == "HUC08") %>% distinct(huc) %>% pull(huc)
+wta_future_huc <- data.table::fread(file.path(wta_dir, "wta_ratios_2040_2070.csv"),
+                                    select = c("huc", "agg")) %>%
+  filter(agg == "HUC08") %>% distinct(huc) %>% pull(huc)
+wta_gap_huc <- setdiff(wta_hist_huc, wta_future_huc)
+wta_gap_sites <- wta %>% filter(!is.finite(raw_wta_change_p90))
+```
+
+The WTA ratios carry the same kind of gap one level up. Of the
+`r length(wta_hist_huc)` HUC8 watersheds in the historical file,
+`r length(wta_gap_huc)` (`r paste(wta_gap_huc, collapse = ", ")`) is absent from
+the projections, leaving `r nrow(wta_gap_sites)` supplies without a WTA exposure
+result. WTA sensitivity is unaffected, since it reads only the historical file.
+As with the counties above, the gap is treated as unavailable rather than as no
+change. It is worth noting alongside the county gaps because both originate in
+the same upstream dataset: a spatial unit present in the baseline and missing
+from the future projections, rather than a genuine absence of water use.
+
 The first map shows every supply without a new result, colored by the reason,
 with county boundaries within 200 km. The second shows all historical counties
 absent from the new future projection file.
