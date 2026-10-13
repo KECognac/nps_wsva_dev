@@ -239,15 +239,15 @@ swi_exp <- calc_swi_exposure(
 Data currently from USFS compilation of all USGS data use data by county:
 ```{r}
 nearby_use_exposure_old <- calc_nearby_use_exposure_old(water_supplies,
-                                                observed_use = fread("data/all/RPAWaterDemand/1_BaseData/Trash 2022/usgswithdrawals.csv"),
-                                                future_use = fread("data/all/RPAWaterDemand/2_Demand_Results/cons_and_withdrawal.csv"),
-                                                save = TRUE,
-                                                output_dir = "data/rapid/outputs/")
+                                                        observed_use = fread("data/all/RPAWaterDemand/1_BaseData/Trash 2022/usgswithdrawals.csv"),
+                                                        future_use = fread("data/all/RPAWaterDemand/2_Demand_Results/cons_and_withdrawal.csv"),
+                                                        save = TRUE,
+                                                        output_dir = "data/rapid/outputs/")
 
 nearby_use_exposure <- calc_nearby_use_exposure(water_supplies,
-                                                      verbose = TRUE,
-                                                      save = TRUE,
-                                                      output_dir = "data/rapid/outputs/")
+                                                verbose = TRUE,
+                                                save = TRUE,
+                                                output_dir = "data/rapid/outputs/")
 
 
 
@@ -295,11 +295,11 @@ temp_exp <- calc_temp_exposure(water_supplies,
 ## Water Rights
 Water Rights exposure in the 21st century.
 
-  Options to choose :
-    1) "2030" - Early-century exposure
-    2) "2050" - Mid-century exposure
-    3) "2080" - Late-century exposure
-  
+Options to choose :
+1) "2030" - Early-century exposure
+2) "2050" - Mid-century exposure
+3) "2080" - Late-century exposure
+
 
 ```{r}
 waterrights_exp <- calc_waterrights_exposure(
@@ -461,10 +461,10 @@ Data currently from USFS compilation of all USGS data use data by county:
 
 ```{r}
 nearby_use_sen_old <- calc_nearby_use_sensitivity_old(water_supplies,
-                                              observed_use = fread("data/all/RPAWaterDemand/1_BaseData/Trash 2022/usgswithdrawals.csv"),
-                                              save = TRUE,
-                                              output_dir = "data/rapid/outputs/",
-                                              verbose = TRUE) %>%
+                                                      observed_use = fread("data/all/RPAWaterDemand/1_BaseData/Trash 2022/usgswithdrawals.csv"),
+                                                      save = TRUE,
+                                                      output_dir = "data/rapid/outputs/",
+                                                      verbose = TRUE) %>%
   # additional metadata exists, don't necessarily need but some are interesting to review as we finalize indicator
   select(wsd_source_id, park_unit,
          raw_avg_nearby_use_per_km2, raw_percent_slope_nearby_use_per_km2, 
@@ -472,14 +472,12 @@ nearby_use_sen_old <- calc_nearby_use_sensitivity_old(water_supplies,
          norm_avg_nearby_use_per_km2, norm_percent_slope_nearby_use_per_km2)
 
 nearby_use_sen <- calc_nearby_use_sensitivity(water_supplies,
-                                                    data_dir = "data/Latest county-level data/",
-                                                    save = TRUE,
-                                                    output_dir = "data/rapid/outputs/",
-                                                    verbose = TRUE)
+                                              save = TRUE,
+                                              output_dir = "data/rapid/outputs/",
+                                              verbose = TRUE)
 
 # Historical HUC8 water-stress sensitivity
 wta_sen <- calc_wta_sensitivity(water_supplies,
-                                data_dir = "data/Latest county-level data/",
                                 huc_level = 8L,
                                 save = TRUE,
                                 output_dir = "data/rapid/outputs/",
@@ -535,9 +533,9 @@ waterrights_sen <- calc_waterrights_sensitivity(
                      "inputs",
                      "WaterRightsIndicator",
                      "waterrights_stress_long.csv"),
-    save = TRUE,
-    output_dir = "data/rapid/outputs/",
-    verbose = TRUE)
+  save = TRUE,
+  output_dir = "data/rapid/outputs/",
+  verbose = TRUE)
 ```
 
 
