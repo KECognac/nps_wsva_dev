@@ -6,8 +6,7 @@ output: html_document
 ```{r setup, include=FALSE}
 # Run from the project root regardless of RStudio's knit-directory setting.
 knitr::opts_knit$set(root.dir = here::here())
-source(here::here("setup.R"), chdir = TRUE)
-source(here::here("src/get_nps_basemap.R"))
+source("setup.R")
 knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE,
                       fig.width = 7, fig.height = 5, dpi = 150)
 theme_set(theme_minimal(base_size = 12))
@@ -30,7 +29,37 @@ average. P10/P50/P90 select the ensemble member nearest each percentile.
 minus the 2000–2020 baseline. P10/P50/P90 report the model/pathway pair nearest
 each absolute-change percentile; SSP1-2.6 is excluded.
 
-Both use full 2020 TIGER/Line counties through `tigris`. 
+Both use full 2020 TIGER/Line counties through `tigris`.
+
+The two versions are not successive editions of one dataset. They are separate
+studies that estimate county water use in fundamentally different ways, which is
+why their results diverge as much as they do.
+
+| | Old (Warziniack et al., 2022) | New (Blumberg and Warziniack) |
+|---|---|---|
+| Sectors | Six: domestic, industrial and mining, thermoelectric, irrigated agriculture, livestock, aquaculture | Three: public supply, crop irrigation, thermoelectric (~90% of US withdrawals) |
+| Method | Structural accounting: each sector is a driver (population, income, irrigated acres, electricity generated) multiplied by a withdrawal rate (gallons per person, per dollar, per acre) | Reduced-form econometric panel on 2000–2020 observed withdrawals, with county-month and state-year fixed effects and county-specific time trends |
+| Climate input | CMIP5 via MACA, 5 models x 4 SSP-RCP core scenarios (AR5 convention) | CMIP6, 7 models x 3 SSPs (SSP2-4.5, SSP3-7.0, SSP5-8.5), 21 members after dropping SSP1-2.6 |
+| Time resolution | Annual | Monthly, so seasonal climate response is estimated separately for each calendar month |
+| Thermoelectric | Sector-level, driven by projected electricity generation | Plant-level, with cooling-type specific responses and climate averaged over transmission-constraint annuli (50–250 km) |
+| Energy transition | Not represented | 24 states' clean-energy targets zero out coal and gas plants by their target dates; plants with no 2018–2020 withdrawals are treated as retired |
+| Adaptation | Withdrawal rates follow assumed efficiency trajectories | Captured empirically by county time trends, with scenarios that relax them |
+
+Three of these differences do most of the work. The **sector change** removes
+livestock, aquaculture, and industrial and mining, so the new version is not
+measuring the same quantity: counties whose demand is dominated by a dropped
+sector shift position substantially. The **method change** replaces an accounting
+identity with historically revealed climate responses, so the new estimates carry
+observed behaviour and adaptation rather than assumed rates. The **energy
+transition assumptions** are new, and they pull thermoelectric demand down
+sharply (the paper reports -27.9% to -19.9% nationally) in exactly the counties
+where the old version projected growing power-sector demand.
+
+Those assumptions are worth stating plainly, because they are policy
+projections rather than climate responses: the new estimates presume all 24
+states meet their clean-energy targets. A county that loses its power plant
+registers as a large decrease in nearby demand, which is a real reduction in
+competition for water but one contingent on that policy outcome.
 
 For both nearby-use versions and WTA exposure, signed absolute change is used
 because percent change can exaggerate small changes when the baseline is low
@@ -39,10 +68,6 @@ the plots scale absolute changes to 0–1 after calculating county withdrawal
 change per area or dimensionless WTA ratio change.
 
 ```{r calculate, include=FALSE}
-source("src/rapid/helper_functions.R")
-source("src/rapid/calc_nearby_use_exposure_old.R")
-source("src/rapid/calc_nearby_use_exposure.R")
-
 sites <- get_wsd(rapid = TRUE)
 
 water_supplies <- sites %>%
@@ -74,7 +99,12 @@ new_future_fips <- data.table::fread(
   select = "FIPS") %>% distinct(FIPS) %>% pull(FIPS) %>% as.integer() %>% sprintf(fmt = "%05d")
 
 pairs <- inner_join(old, new, by = "wsd_source_id", suffix = c("_old", "_new")) %>%
-  filter(is.finite(p90_old), is.finite(p90_new))
+  filter(is.finite(p90_old), is.finite(p90_new)) %>%
+  # Each version is min-max normalized over its own set of supplies, and a few
+  # extreme old values squeeze the rest into a narrow band, so the normalized
+  # scores are not comparable point-for-point. Rank the raw changes within the
+  # shared set of supplies instead.
+  mutate(rank_old = percent_rank(raw_p90_old), rank_new = percent_rank(raw_p90_new))
 
 # Agreement between versions. Spearman is unaffected by min-max scaling.
 agreement <- list(
@@ -82,10 +112,12 @@ agreement <- list(
   spearman = cor(pairs$p90_old, pairs$p90_new, method = "spearman"),
   same_sign = mean(sign(pairs$raw_p90_old) == sign(pairs$raw_p90_new)),
   old_range = range(pairs$raw_p90_old),
-  new_range = range(pairs$raw_p90_new))
+  new_range = range(pairs$raw_p90_new),
+  # How badly the old extremes compress the old normalized scale, and whether
+  # ranking changes the sign of the apparent relationship.
+  old_middle90 = unname(quantile(pairs$p90_old, c(.05, .95))),
+  pearson_rank = cor(pairs$rank_old, pairs$rank_new))
 
-source("src/rapid/calc_wta_exposure.R")
-source("src/rapid/calc_waterrights_exposure.R")
 wta <- calc_wta_exposure(water_supplies, huc_level = 8L, verbose = FALSE) %>%
   select(wsd_source_id, huc, raw_wta_change_p90, norm_wta_change_p90)
 wta_distribution <- wta %>%
@@ -163,25 +195,37 @@ missing only from the old version.
 knitr::kable(missing_new)
 ```
 
-The plot and maps use `norm_absolute_use_change_p90`: signed withdrawal change
-per county area, then scaled to 0–1 separately for each version. Each point is a
-supply with both results; the dashed line marks equal normalized scores.
+The plot compares the two versions by percentile rank of
+`raw_absolute_use_change_p90`: signed withdrawal change per county area, ranked
+within the supplies that have both results. Ranking rather than plotting the
+normalized scores keeps the comparison honest. Each version is min-max scaled
+over its own set of supplies, and a handful of extreme old values pin the ends
+of the old scale: 90% of old normalized scores fall between
+`r round(agreement$old_middle90[1], 2)` and `r round(agreement$old_middle90[2], 2)`,
+a span of just `r round(diff(agreement$old_middle90), 2)` of the 0–1 range.
+Plotted that way the points form a tight vertical band that reflects the scaling
+rather than the relationship. Each point is a supply with both results; the
+dashed line marks equal rank.
 
 ```{r}
-ggplotly(ggplot(pairs, aes(p90_old, p90_new)) +
+ggplotly(ggplot(pairs, aes(rank_old, rank_new)) +
   geom_abline(slope = 1, intercept = 0, linetype = 2, color = "grey55") +
   geom_point(alpha = .45, color = "#2166AC") +
   coord_equal(xlim = c(0, 1), ylim = c(0, 1)) +
-  labs(title = "Normalized P90 change in county withdrawals",
-       subtitle = paste(nrow(pairs), "water supplies with both results"),
-       x = "Old: normalized change", y = "New: normalized change"))
+  # ggplotly drops subtitles, so the supply count goes in the title.
+  labs(title = paste0("Percentile rank of P90 change in county withdrawals (",
+                      nrow(pairs), " supplies with both results)"),
+       x = "Old: percentile rank", y = "New: percentile rank"))
 ```
 
 ### Spatial comparison
 
-The updated nearby-use estimates differ because they use three withdrawal sectors,
-newer historical and future periods, and a different model/scenario ensemble than
-the six-sector USGS/RPA dataset.
+The maps below show where the two versions disagree. Given the differences set
+out above, the disagreement is expected rather than a sign that one version is
+wrong: the versions cover different sectors, estimate demand by different means,
+and make different assumptions about the power sector. Weak agreement is the
+result of comparing two genuinely different estimates of county water use, not
+of a processing error in either.
 
 The two versions agree only weakly. Across the `r nrow(pairs)` supplies with
 both results, the rank (Spearman) correlation of P90 change is
@@ -191,8 +235,14 @@ correlation of the normalized scores is `r round(agreement$pearson, 2)`, pulled
 down by a few extreme old values: old raw P90 change ranges from
 `r signif(agreement$old_range[1], 2)` to `r signif(agreement$old_range[2], 2)`
 MGD/km2, versus `r signif(agreement$new_range[1], 2)` to
-`r signif(agreement$new_range[2], 2)` for the new version. Those extremes
-compress most old normalized scores into a narrow band in the plot above.
+`r signif(agreement$new_range[2], 2)` for the new version. Those extremes are
+also why the rank plot above is the fair comparison, and the reason matters:
+the Pearson correlation of the normalized scores is negative while the rank
+correlation is positive (`r round(agreement$pearson_rank, 2)`). A plot of
+normalized scores would therefore suggest the two versions run in opposite
+directions, when in fact they agree weakly but positively. Ranked, the points
+spread across the square along a loose diagonal, which is the agreement the
+Spearman correlation actually reports.
 
 The synchronized maps share the same 0–1 color scale.
 
