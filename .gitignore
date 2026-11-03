@@ -3,6 +3,7 @@
 .RData
 .Ruserdata
 .DS_Store
+**/.DS_Store
 data
-inst/doc
 tests/testthat/fixtures/golden/
+tests/testthat/_snaps/**/*.new.*
