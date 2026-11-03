@@ -9,13 +9,13 @@
 #' ([trend::mk.test()]); sites with fewer than 3 years get `NA`.
 #'
 #' @param water_supplies sf object. The water supplies, with a
-#'   `wsd_source_id` column, e.g. from [wavacore::get_wsd()]. Only their IDs
+#'   `wsd_source_id` column, e.g. from [npswavacore::get_wsd()]. Only their IDs
 #'   are used, to pick rows from the processed file. Required.
 #' @param swe_data String. The folder of processed snow parquet files from
 #'   [process_loca2_mwbm()]. Only the Jay Alder training file is read; stops
 #'   with an error if there isn't one. Default:
 #'   `rapid/inputs/loca2_swe_water_supplies` in the shared data folder,
-#'   see [wavacore::wava_data_path()].
+#'   see [npswavacore::wava_data_path()].
 #' @param historical Character or numeric vector of 2 years, e.g.
 #'   `c(1980, 2010)`. The first and last year of the trend period. The
 #'   training run covers 1950-2014. Required.
@@ -59,14 +59,14 @@
 #' @export
 #' @seealso [calc_swe_exposure()] for the projected change;
 #'   [process_loca2_mwbm()], which makes the input files.
-#' @examplesIf file.exists(wavacore::wava_data_path("rapid", "inputs", "loca2_swe_water_supplies", "Jay_Alder_snow_MWBM_LOCA2_training_195001-201412.nc.parquet"))
-#' ws <- wavacore::get_wsd(park = "ROMO")
+#' @examplesIf file.exists(npswavacore::wava_data_path("rapid", "inputs", "loca2_swe_water_supplies", "Jay_Alder_snow_MWBM_LOCA2_training_195001-201412.nc.parquet"))
+#' ws <- npswavacore::get_wsd(park = "ROMO")
 #' swe_sen <- calc_swe_sensitivity(ws, historical = c(1980, 2010))
 #' swe_sen[, c("wsd_source_id", "raw_avg_swe", "raw_percent_slope_swe",
 #'             "trend_direction")]
 
 calc_swe_sensitivity <- function(water_supplies,
-                                 swe_data = wavacore::wava_data_path("rapid", "inputs", "loca2_swe_water_supplies/"),
+                                 swe_data = npswavacore::wava_data_path("rapid", "inputs", "loca2_swe_water_supplies/"),
                                  historical,
                                  water_year = TRUE,
                                  save = FALSE,

@@ -19,14 +19,14 @@
 #'   means more severe.
 #'
 #' @param water_supplies sf object. The water supplies, with `wsd_source_id`
-#'   and `park_unit` columns, e.g. from [wavacore::get_wsd()]. Only their IDs
+#'   and `park_unit` columns, e.g. from [npswavacore::get_wsd()]. Only their IDs
 #'   are used, to pick rows from the files. Required.
 #' @param precip_data String. The folder with the processed training
 #'   precipitation file,
 #'   `jay_alder_pr_MWBM_LOCA2_training_195001-201412.nc.parquet`; stops with
 #'   an error if it isn't there. Default:
 #'   `rapid/inputs/loca2_precipitation_water_supplies` in the shared data
-#'   folder, see [wavacore::wava_data_path()].
+#'   folder, see [npswavacore::wava_data_path()].
 #' @param pet_data String. The folder with the processed training PET file,
 #'   `jay_alder_pet_MWBM_LOCA2_training_195001-201412.nc.parquet`; stops with
 #'   an error if it isn't there. The name is matched exactly, so on a
@@ -83,15 +83,15 @@
 #' @export
 #' @seealso [calc_drought_exposure()] for the projected change;
 #'   [calc_precip_sensitivity()], which reads the same precipitation file.
-#' @examplesIf file.exists(wavacore::wava_data_path("rapid", "inputs", "loca2_pet_water_supplies", "jay_alder_pet_MWBM_LOCA2_training_195001-201412.nc.parquet"))
-#' ws <- wavacore::get_wsd(park = "ZION")
+#' @examplesIf file.exists(npswavacore::wava_data_path("rapid", "inputs", "loca2_pet_water_supplies", "jay_alder_pet_MWBM_LOCA2_training_195001-201412.nc.parquet"))
+#' ws <- npswavacore::get_wsd(park = "ZION")
 #' drought_sen <- calc_drought_sensitivity(ws, historical = c(1980, 2010))
 #' drought_sen[, c("wsd_source_id", "raw_slope_spei", "trend_direction",
 #'                 "raw_drought_month_frequency", "raw_avg_drought_severity")]
 
 calc_drought_sensitivity <- function(water_supplies,
-                                     precip_data = wavacore::wava_data_path("rapid", "inputs", "loca2_precipitation_water_supplies/"),
-                                     pet_data = wavacore::wava_data_path("rapid", "inputs", "loca2_pet_water_supplies/"),
+                                     precip_data = npswavacore::wava_data_path("rapid", "inputs", "loca2_precipitation_water_supplies/"),
+                                     pet_data = npswavacore::wava_data_path("rapid", "inputs", "loca2_pet_water_supplies/"),
                                      spei_scale = 12,
                                      spei_inf_cap = 4,
                                      drought_threshold = -1,

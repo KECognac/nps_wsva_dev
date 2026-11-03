@@ -15,13 +15,13 @@
 #'
 #' @param water_supplies sf object. The water supplies, as points with
 #'   `wsd_source_id`, `park_unit` and `park_name` columns, e.g. from
-#'   [wavacore::get_wsd()]. Stops with an error if a column is missing.
+#'   [npswavacore::get_wsd()]. Stops with an error if a column is missing.
 #'   Required.
 #' @param cusp_dir_path String. The folder with the CUSP tile subfolders;
 #'   every `.shp` file below it is read. Stops with an error if the folder
 #'   doesn't exist or has no shapefiles. With `save = TRUE`, the combined
 #'   shoreline is also written here. Default: `all/coast_comp_data/NOAA_CUSP`
-#'   in the shared data folder, see [wavacore::wava_data_path()].
+#'   in the shared data folder, see [npswavacore::wava_data_path()].
 #' @param ncpu Integer. The number of parallel workers for the elevation
 #'   queries. Default: `6`.
 #' @param max_coast_dist_m Numeric. The largest distance from the coast, in
@@ -61,19 +61,19 @@
 #' @seealso [calc_storm_surge_exposure()], [calc_storm_surge_sensitivity()],
 #'   [calc_swi_exposure()] and [calc_inundation_exposure()], which read
 #'   `coastal_site_geometry.csv`.
-#' @examplesIf interactive() && dir.exists(wavacore::wava_data_path("all", "coast_comp_data", "NOAA_CUSP"))
+#' @examplesIf interactive() && dir.exists(npswavacore::wava_data_path("all", "coast_comp_data", "NOAA_CUSP"))
 #' # Reads every CUSP shoreline tile (about 3 GB) and queries the USGS
 #' # elevation service, so it needs internet and takes several minutes
-#' ws <- wavacore::get_wsd(park = "BISC")
+#' ws <- npswavacore::get_wsd(park = "BISC")
 #' geometry <- process_coastal_geometry(ws, save = FALSE)
 #' geometry
 
 process_coastal_geometry <- function(water_supplies,
-                                     cusp_dir_path = wavacore::wava_data_path("all", "coast_comp_data", "NOAA_CUSP"),
+                                     cusp_dir_path = npswavacore::wava_data_path("all", "coast_comp_data", "NOAA_CUSP"),
                                      ncpu = 6,
                                      max_coast_dist_m = 50000,
                                      save = TRUE,
-                                     output_dir = wavacore::wava_data_path("rapid", "inputs", "coast_comp"),
+                                     output_dir = npswavacore::wava_data_path("rapid", "inputs", "coast_comp"),
                                      verbose = TRUE) {
   
   # Input validation

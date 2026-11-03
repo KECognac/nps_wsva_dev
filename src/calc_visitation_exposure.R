@@ -3,7 +3,7 @@
 #' @description
 #' Projects annual recreation visits and the seasonality of visits for each
 #' park unit in `water_supplies` to 2050, from the NPS visitation statistics
-#' API through [wavacore::getUnitVisitation()], so it needs internet. A few
+#' API through [npswavacore::get_unit_visitation()], so it needs internet. A few
 #' WSD codes are looked up under a different visitation code (ANAC and NACE
 #' as NCPE, NAMA as NCPC, VALR as PERL); the output keeps the WSD code.
 #'
@@ -30,7 +30,7 @@
 #' and get `NA`.
 #'
 #' @param water_supplies Data frame or sf object. The water supplies, with a
-#'   `park_unit` column, e.g. from [wavacore::get_wsd()]. One request is made
+#'   `park_unit` column, e.g. from [npswavacore::get_wsd()]. One request is made
 #'   per park unit, and the results are joined back onto these rows.
 #'   Required.
 #' @param start_year Integer. The first year of visitation to request and
@@ -70,10 +70,10 @@
 #'   [add_standardized_indicators()].
 #' @export
 #' @seealso [calc_visitation_sensitivity()] for the historical trend;
-#'   [wavacore::getUnitVisitation()], which downloads the visitation data.
+#'   [npswavacore::get_unit_visitation()], which downloads the visitation data.
 #' @examplesIf interactive()
 #' # Downloads visitation statistics from the NPS API, so it needs internet
-#' ws <- wavacore::get_wsd(park = c("ZION", "GRSA"))
+#' ws <- npswavacore::get_wsd(park = c("ZION", "GRSA"))
 #' visitation_exp <- calc_visitation_exposure(ws)
 #' unique(sf::st_drop_geometry(visitation_exp)[, c("park_unit", "slope_adjustment",
 #'                                                 "raw_visitation_pct_change")])
@@ -114,7 +114,7 @@ calc_visitation_exposure <- function(water_supplies,
     visitation_code <- unname(visitation_code_crosswalk[park_unit_clean])
     if (is.na(visitation_code)) visitation_code <- park_unit_clean
 
-    visitation <- wavacore::getUnitVisitation(units = visitation_code,
+    visitation <- npswavacore::get_unit_visitation(units = visitation_code,
                                     startYear = start_year,
                                     endYear = 2024)
     

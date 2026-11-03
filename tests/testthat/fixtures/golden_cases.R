@@ -27,7 +27,7 @@
 # Paths in the shared data folder, for arguments with no default. make_golden.R
 # sets options(wava.data_dir) to the old code's `data` link, so both runs read
 # the same files.
-golden_data_path <- function(...) wavacore::wava_data_path(...)
+golden_data_path <- function(...) npswavacore::wava_data_path(...)
 
 # The folder a case that writes files writes into, inside tempdir(). Nothing
 # else may be written (see golden_run()).
@@ -55,7 +55,7 @@ golden_site_ids <- c(
 
 # Inputs, made once by make_golden.R with the OLD code and saved in
 # golden/inputs.rds; test-golden.R reads them from there. So both runs get the
-# identical objects, and the test doesn't call get_wsd() (wavacore's golden
+# identical objects, and the test doesn't call get_wsd() (npswavacore's golden
 # tests cover it). Each one is a function of the inputs made before it.
 golden_inputs <- list(
   # Every rapid water supply. The water rights functions need all of them:

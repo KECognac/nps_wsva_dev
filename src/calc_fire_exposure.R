@@ -11,7 +11,7 @@
 #'
 #' @param water_supplies sf object. The water supplies, as points with
 #'   `wsd_source_id`, `park_unit` and `park_name` columns, e.g. from
-#'   [wavacore::get_wsd()]. Required.
+#'   [npswavacore::get_wsd()]. Required.
 #' @param fire_prob_data Data frame. The change in fire probability by pyrome
 #'   and climate model, with columns `PYROME`, `GCM` and `delta_fp` (percent
 #'   change), as made in `rapid_data_processing.Rmd` and saved to
@@ -56,11 +56,11 @@
 #' @export
 #' @seealso [calc_fire_sensitivity()] for current wildfire hazard;
 #'   [calc_vulnerability_index()].
-#' @examplesIf file.exists(wavacore::wava_data_path("rapid", "inputs", "pyromes.gpkg"))
-#' ws <- wavacore::get_wsd(park = "ZION")
-#' pyromes <- sf::st_read(wavacore::wava_data_path("rapid", "inputs", "pyromes.gpkg"),
+#' @examplesIf file.exists(npswavacore::wava_data_path("rapid", "inputs", "pyromes.gpkg"))
+#' ws <- npswavacore::get_wsd(park = "ZION")
+#' pyromes <- sf::st_read(npswavacore::wava_data_path("rapid", "inputs", "pyromes.gpkg"),
 #'                        quiet = TRUE)
-#' fire_prob <- readr::read_csv(wavacore::wava_data_path("rapid", "inputs",
+#' fire_prob <- readr::read_csv(npswavacore::wava_data_path("rapid", "inputs",
 #'                                                       "fire_probability_change.csv"),
 #'                              show_col_types = FALSE)
 #' fire_exp <- calc_fire_exposure(ws, fire_prob_data = fire_prob, pyrome_data = pyromes)

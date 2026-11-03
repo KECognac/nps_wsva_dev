@@ -15,7 +15,7 @@
 #' show warming.
 #'
 #' @param water_supplies sf object. The water supplies, with a
-#'   `wsd_source_id` column, e.g. from [wavacore::get_wsd()]. Only their IDs
+#'   `wsd_source_id` column, e.g. from [npswavacore::get_wsd()]. Only their IDs
 #'   are used, to pick rows from the processed files, so they must be the IDs
 #'   the files were made with. Required.
 #' @param temp_data String. The folder of processed temperature parquet
@@ -24,7 +24,7 @@
 #'   an error if none overlap the periods. Default:
 #'   `rapid/inputs/loca2_temperature_water_supplies` in the shared data
 #'   folder,
-#'   see [wavacore::wava_data_path()].
+#'   see [npswavacore::wava_data_path()].
 #' @param hindcast Logical. Where the historical period comes from.
 #'   * `TRUE`: each model's own historical run, so the change is measured
 #'     within each model. Historical years after the historical run ends
@@ -80,17 +80,17 @@
 #'   [process_loca2_mwbm()], which makes the input files (`var =
 #'   "tasmin_tavg"` and `"tasmax_tavg"`);
 #'   [calc_vulnerability_index()].
-#' @examplesIf interactive() && dir.exists(wavacore::wava_data_path("rapid", "inputs", "loca2_temperature_water_supplies"))
+#' @examplesIf interactive() && dir.exists(npswavacore::wava_data_path("rapid", "inputs", "loca2_temperature_water_supplies"))
 #' # Reads the processed temperature files for both periods (several GB),
 #' # so it takes several minutes even for one park
-#' ws <- wavacore::get_wsd(park = "ZION")
+#' ws <- npswavacore::get_wsd(park = "ZION")
 #' temp_exp <- calc_temp_exposure(ws,
 #'                                historical = c(1980, 2010),
 #'                                future = c(2035, 2065))
 #' temp_exp
 
 calc_temp_exposure <- function(water_supplies,
-                               temp_data = wavacore::wava_data_path("rapid", "inputs", "loca2_temperature_water_supplies/"),
+                               temp_data = npswavacore::wava_data_path("rapid", "inputs", "loca2_temperature_water_supplies/"),
                                hindcast = TRUE,
                                historical,
                                future,

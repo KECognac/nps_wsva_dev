@@ -14,7 +14,7 @@
 #'
 #' @param water_supplies sf object. The water supplies, as points with
 #'   `wsd_source_id`, `park_unit` and `park_name` columns, e.g. from
-#'   [wavacore::get_wsd()]. Stops with an error if a column is missing.
+#'   [npswavacore::get_wsd()]. Stops with an error if a column is missing.
 #'   Required.
 #' @param swi_pts String or sf object. The saltwater intrusion points from
 #'   [process_swi_data()], with a `Case_C` column.
@@ -23,7 +23,7 @@
 #'   * sf object: the points, already read.
 #'
 #'   Default: `rapid/inputs/swi/swi_points.gpkg` in the shared data folder,
-#'   see [wavacore::wava_data_path()].
+#'   see [npswavacore::wava_data_path()].
 #' @param coast_distances String. Path to `coastal_site_geometry.csv` from
 #'   [process_coastal_geometry()], joined by `wsd_source_id`, `park_unit` and
 #'   `park_name`; only `coast_dist_m` is used. Stops with an error if the
@@ -63,15 +63,15 @@
 #' @seealso [process_swi_data()] and [process_coastal_geometry()], which make
 #'   the inputs; [calc_storm_surge_exposure()] and
 #'   [calc_inundation_exposure()], the other coastal indicators.
-#' @examplesIf file.exists(wavacore::wava_data_path("rapid", "inputs", "swi", "swi_points.gpkg"))
-#' ws <- wavacore::get_wsd(park = "BISC")
+#' @examplesIf file.exists(npswavacore::wava_data_path("rapid", "inputs", "swi", "swi_points.gpkg"))
+#' ws <- npswavacore::get_wsd(park = "BISC")
 #' swi_exp <- calc_swi_exposure(ws)
 #' swi_exp
 
 calc_swi_exposure <- function(
     water_supplies,
-    swi_pts    = wavacore::wava_data_path("rapid", "inputs", "swi", "swi_points.gpkg"),
-    coast_distances = wavacore::wava_data_path("rapid", "inputs", "coast_comp", "coastal_site_geometry.csv"),
+    swi_pts    = npswavacore::wava_data_path("rapid", "inputs", "swi", "swi_points.gpkg"),
+    coast_distances = npswavacore::wava_data_path("rapid", "inputs", "coast_comp", "coastal_site_geometry.csv"),
     save       = FALSE,
     output_dir = NULL,
     verbose    = TRUE) {

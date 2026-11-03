@@ -17,7 +17,7 @@
 #' means. Changes are percentages, except temperature, which is in degrees C.
 #'
 #' @param water_supplies sf object. The water supplies, with `wsd_source_id`
-#'   and `park_unit` columns, e.g. from [wavacore::get_wsd()]. Every supply
+#'   and `park_unit` columns, e.g. from [npswavacore::get_wsd()]. Every supply
 #'   gets a row for each variable and period, `NA` when there is no data.
 #'   Required.
 #' @param data_dirs Named character vector or named list. The folder of
@@ -25,7 +25,7 @@
 #'   `snow`, `stor`, `precip` and `temp`. Stops with an error if a requested
 #'   variable has no folder or files. Default: the
 #'   `rapid/inputs/loca2_*_water_supplies` folders in the shared data folder,
-#'   see [wavacore::wava_data_path()].
+#'   see [npswavacore::wava_data_path()].
 #' @param variables Character vector. The variables to calculate, from the
 #'   names above (any case). Stops with an error for an unknown name. Default:
 #'   `names(data_dirs)`, all of them.
@@ -81,10 +81,10 @@
 #'   [calc_runoff_exposure()], [calc_precip_exposure()],
 #'   [calc_swe_exposure()] and [calc_temp_exposure()] for the indicator
 #'   versions.
-#' @examplesIf interactive() && dir.exists(wavacore::wava_data_path("rapid", "inputs", "loca2_runoff_water_supplies"))
+#' @examplesIf interactive() && dir.exists(npswavacore::wava_data_path("rapid", "inputs", "loca2_runoff_water_supplies"))
 #' # Reads every processed file for the chosen variables (several GB each),
 #' # so it takes a long time
-#' ws <- wavacore::get_wsd(park = "ZION")
+#' ws <- npswavacore::get_wsd(park = "ZION")
 #' summary_mid <- calc_loca2_change_summary(
 #'   ws,
 #'   variables = c("runoff", "temp"),
@@ -93,13 +93,13 @@
 #' summary_mid
 
 calc_loca2_change_summary <- function(water_supplies,
-                                      data_dirs = c(aet = wavacore::wava_data_path("rapid", "inputs", "loca2_aet_water_supplies/"),
-                                                    pet = wavacore::wava_data_path("rapid", "inputs", "loca2_pet_water_supplies/"),
-                                                    runoff = wavacore::wava_data_path("rapid", "inputs", "loca2_runoff_water_supplies/"),
-                                                    snow = wavacore::wava_data_path("rapid", "inputs", "loca2_swe_water_supplies/"),
-                                                    stor = wavacore::wava_data_path("rapid", "inputs", "loca2_stor_water_supplies/"),
-                                                    precip = wavacore::wava_data_path("rapid", "inputs", "loca2_precipitation_water_supplies/"),
-                                                    temp = wavacore::wava_data_path("rapid", "inputs", "loca2_temperature_water_supplies/")),
+                                      data_dirs = c(aet = npswavacore::wava_data_path("rapid", "inputs", "loca2_aet_water_supplies/"),
+                                                    pet = npswavacore::wava_data_path("rapid", "inputs", "loca2_pet_water_supplies/"),
+                                                    runoff = npswavacore::wava_data_path("rapid", "inputs", "loca2_runoff_water_supplies/"),
+                                                    snow = npswavacore::wava_data_path("rapid", "inputs", "loca2_swe_water_supplies/"),
+                                                    stor = npswavacore::wava_data_path("rapid", "inputs", "loca2_stor_water_supplies/"),
+                                                    precip = npswavacore::wava_data_path("rapid", "inputs", "loca2_precipitation_water_supplies/"),
+                                                    temp = npswavacore::wava_data_path("rapid", "inputs", "loca2_temperature_water_supplies/")),
                                       variables = names(data_dirs),
                                       hindcast = TRUE,
                                       historical = c(1980, 2010),

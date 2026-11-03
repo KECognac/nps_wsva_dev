@@ -39,7 +39,7 @@
 #'   * `NULL`: only allowed with `save = FALSE`.
 #'
 #'   Default: `rapid/inputs/storm_surge` in the shared data folder, see
-#'   [wavacore::wava_data_path()].
+#'   [npswavacore::wava_data_path()].
 #' @param verbose Logical. Whether to print progress.
 #'   * `TRUE`: prints messages for each step, the run time and the path of the
 #'     saved file.
@@ -57,17 +57,17 @@
 #' @export
 #' @seealso [calc_storm_surge_exposure()] and
 #'   [calc_storm_surge_sensitivity()], which read the GeoPackage.
-#' @examplesIf dir.exists(wavacore::wava_data_path("all", "coast_comp_data", "storm_surge_muis_2023_RP10"))
+#' @examplesIf dir.exists(npswavacore::wava_data_path("all", "coast_comp_data", "storm_surge_muis_2023_RP10"))
 #' # Reshape the NetCDF files without writing the GeoPackage
 #' stations <- process_storm_surge_data(
-#'   data_dir = wavacore::wava_data_path("all", "coast_comp_data", "storm_surge_muis_2023_RP10"),
+#'   data_dir = npswavacore::wava_data_path("all", "coast_comp_data", "storm_surge_muis_2023_RP10"),
 #'   save = FALSE
 #' )
 #' table(stations$model)
 
 process_storm_surge_data <- function(data_dir,
                                      save = TRUE,
-                                     output_dir = wavacore::wava_data_path("rapid", "inputs", "storm_surge"),
+                                     output_dir = npswavacore::wava_data_path("rapid", "inputs", "storm_surge"),
                                      verbose = TRUE) {
   
   # Input validation

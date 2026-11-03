@@ -17,11 +17,11 @@
 #'
 #' @param water_supplies sf object. The water supplies, as points with
 #'   `wsd_source_id`, `park_unit` and `park_name` columns, e.g. from
-#'   [wavacore::get_wsd()]. Required.
+#'   [npswavacore::get_wsd()]. Required.
 #' @param data_dir String. The folder with `wta_ratios_2000_2020.csv` and
 #'   `wta_ratios_2040_2070.csv`. Default:
 #'   `Latest county-level data/water_demand_projections` in the shared data
-#'   folder, see [wavacore::wava_data_path()].
+#'   folder, see [npswavacore::wava_data_path()].
 #' @param watersheds String or sf object. The watershed polygons, with a
 #'   `huc<huc_level>` column (e.g. `huc8`).
 #'   * String: path to a WBD geodatabase; the `WBDHU<huc_level>` layer is
@@ -85,18 +85,18 @@
 #' @seealso [calc_wta_sensitivity()] for the historical ratio;
 #'   [calc_nearby_use_exposure()] for county withdrawals from the same
 #'   projections.
-#' @examplesIf interactive() && dir.exists(wavacore::wava_data_path("all", "WBD_National_GDB.gdb"))
+#' @examplesIf interactive() && dir.exists(npswavacore::wava_data_path("all", "WBD_National_GDB.gdb"))
 #' # Reads the national HUC8 layer of the WBD geodatabase, so it takes a few
 #' # minutes. Read it once and pass it in to reuse it.
-#' huc8 <- sf::st_read(wavacore::wava_data_path("all", "WBD_National_GDB.gdb"),
+#' huc8 <- sf::st_read(npswavacore::wava_data_path("all", "WBD_National_GDB.gdb"),
 #'                     layer = "WBDHU8", quiet = TRUE)
-#' ws <- wavacore::get_wsd(park = c("ZION", "ROMO"))
+#' ws <- npswavacore::get_wsd(park = c("ZION", "ROMO"))
 #' wta_exp <- calc_wta_exposure(ws, watersheds = huc8)
 #' wta_exp[, c("wsd_source_id", "huc", "raw_wta_change_p50", "data_status")]
 
 calc_wta_exposure <- function(water_supplies,
-                              data_dir = wavacore::wava_data_path("Latest county-level data", "water_demand_projections"),
-                              watersheds = wavacore::wava_data_path("all", "WBD_National_GDB.gdb"),
+                              data_dir = npswavacore::wava_data_path("Latest county-level data", "water_demand_projections"),
+                              watersheds = npswavacore::wava_data_path("all", "WBD_National_GDB.gdb"),
                               huc_level = 8L,
                               emission_scenarios = NULL,
                               climate_models = NULL,

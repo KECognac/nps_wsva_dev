@@ -27,12 +27,12 @@
 #'   that can't be parsed. Required.
 #' @param water_supplies sf object. The water supplies, as `POINT` geometries
 #'   with `wsd_source_id` and `park_unit` columns, e.g. from
-#'   [wavacore::get_wsd()]. Stops with an error if any point is outside the
+#'   [npswavacore::get_wsd()]. Stops with an error if any point is outside the
 #'   LOCA2 grid. Required.
 #' @param output_dir String. The folder for the parquet file, created if it
 #'   doesn't exist. Default:
 #'   `rapid/inputs/loca_cmip6_precip_periods_water_supplies` in the shared
-#'   data folder, see [wavacore::wava_data_path()].
+#'   data folder, see [npswavacore::wava_data_path()].
 #' @param overwrite Logical. What to do when the output file already exists.
 #'   * `TRUE`: processes the file again and replaces it.
 #'   * `FALSE`: skips the file and returns the existing path.
@@ -50,18 +50,18 @@
 #'   [calc_dry_period_sensitivity()] and [calc_wet_period_sensitivity()],
 #'   which read the parquet files; [process_loca2_mwbm()] for the other LOCA2
 #'   variables.
-#' @examplesIf interactive() && dir.exists(wavacore::wava_data_path("all", "loca_cmip6_precip_products"))
+#' @examplesIf interactive() && dir.exists(npswavacore::wava_data_path("all", "loca_cmip6_precip_products"))
 #' # One file is about 0.7 GB, so this takes a few minutes
-#' ws <- wavacore::get_wsd(park = "ZION")
+#' ws <- npswavacore::get_wsd(park = "ZION")
 #' nc_name <- "ACCESS-CM2.historical.r1i1p1f1.1950-2014.LOCA_16thdeg_pr_metrics.nc"
-#' nc <- wavacore::wava_data_path("all", "loca_cmip6_precip_products", "historical", nc_name)
+#' nc <- npswavacore::wava_data_path("all", "loca_cmip6_precip_products", "historical", nc_name)
 #' out_file <- process_precip_period_data(nc, ws, output_dir = tempdir())
 #' head(arrow::read_parquet(out_file))
 
 process_precip_period_data <- function(
     nc_path,
     water_supplies,
-    output_dir = wavacore::wava_data_path("rapid", "inputs", "loca_cmip6_precip_periods_water_supplies/"),
+    output_dir = npswavacore::wava_data_path("rapid", "inputs", "loca_cmip6_precip_periods_water_supplies/"),
     overwrite = FALSE,
     verbose = TRUE) {
 

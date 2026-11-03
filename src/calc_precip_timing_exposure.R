@@ -25,14 +25,14 @@
 #' percentile of the absolute shift, whatever its direction.
 #'
 #' @param water_supplies sf object. The water supplies, with a
-#'   `wsd_source_id` column, e.g. from [wavacore::get_wsd()]. Only their IDs
+#'   `wsd_source_id` column, e.g. from [npswavacore::get_wsd()]. Only their IDs
 #'   are used, to pick rows from the processed files. Required.
 #' @param precip_data String. The folder of processed precipitation parquet
 #'   files from [process_loca2_mwbm()]. Stops with an error if no files are
 #'   left after the `hindcast` and year filters. Default:
 #'   `rapid/inputs/loca2_precipitation_water_supplies` in the shared data
 #'   folder,
-#'   see [wavacore::wava_data_path()].
+#'   see [npswavacore::wava_data_path()].
 #' @param hindcast Logical. Where the historical period comes from.
 #'   * `TRUE`: each model's own historical run, so the shift is measured
 #'     within each model. Historical years after the historical run ends
@@ -101,17 +101,17 @@
 #' @seealso [calc_precip_exposure()] for the change in amount;
 #'   [calc_runoff_timing_exposure()] for runoff timing;
 #'   [process_loca2_mwbm()], which makes the input files.
-#' @examplesIf interactive() && dir.exists(wavacore::wava_data_path("rapid", "inputs", "loca2_precipitation_water_supplies"))
+#' @examplesIf interactive() && dir.exists(npswavacore::wava_data_path("rapid", "inputs", "loca2_precipitation_water_supplies"))
 #' # Reads the processed precipitation files for both periods (several GB),
 #' # so it takes several minutes even for one park
-#' ws <- wavacore::get_wsd(park = "ZION")
+#' ws <- npswavacore::get_wsd(park = "ZION")
 #' timing_exp <- calc_precip_timing_exposure(ws,
 #'                                           historical = c(1980, 2010),
 #'                                           future = c(2035, 2065))
 #' timing_exp
 
 calc_precip_timing_exposure <- function(water_supplies,
-                                        precip_data = wavacore::wava_data_path("rapid", "inputs", "loca2_precipitation_water_supplies/"),
+                                        precip_data = npswavacore::wava_data_path("rapid", "inputs", "loca2_precipitation_water_supplies/"),
                                         hindcast = TRUE,
                                         historical,
                                         future,

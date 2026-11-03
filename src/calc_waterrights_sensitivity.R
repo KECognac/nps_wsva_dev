@@ -36,7 +36,7 @@
 #'   * Data frame: the same table, already read.
 #'
 #'   Default: `rapid/inputs/WaterRightsIndicator/waterrights_stress_long.csv`
-#'   in the shared data folder, see [wavacore::wava_data_path()].
+#'   in the shared data folder, see [npswavacore::wava_data_path()].
 #' @param save Logical. Whether to write the results to a CSV file.
 #'   * `TRUE`: writes `waterrights_sensitivity_<date>.csv`, named with today's date, to
 #'     `output_dir`, creating the folder if needed. Stops with an error if
@@ -64,14 +64,14 @@
 #' @export
 #' @seealso [calc_waterrights_exposure()] for the projected stress;
 #'   [process_waterrightsindicator_data()], which makes `stress_data`.
-#' @examplesIf file.exists(wavacore::wava_data_path("rapid", "inputs", "WaterRightsIndicator", "waterrights_stress_long.csv"))
+#' @examplesIf file.exists(npswavacore::wava_data_path("rapid", "inputs", "WaterRightsIndicator", "waterrights_stress_long.csv"))
 #' # The stress table and water_supplies must cover the same supplies, so
 #' # keep the same ones in both
-#' stress <- readr::read_csv(wavacore::wava_data_path("rapid", "inputs",
+#' stress <- readr::read_csv(npswavacore::wava_data_path("rapid", "inputs",
 #'                                                    "WaterRightsIndicator",
 #'                                                    "waterrights_stress_long.csv"),
 #'                           show_col_types = FALSE)
-#' ws <- wavacore::get_wsd(park = "ZION")
+#' ws <- npswavacore::get_wsd(park = "ZION")
 #' ws <- ws[ws$wsd_source_id %in% stress$wsd_source_id, ]
 #' stress <- stress[stress$wsd_source_id %in% ws$wsd_source_id, ]
 #'
@@ -80,7 +80,7 @@
 
 calc_waterrights_sensitivity <- function(
     water_supplies,
-    stress_data = wavacore::wava_data_path("rapid",
+    stress_data = npswavacore::wava_data_path("rapid",
                        "inputs",
                        "WaterRightsIndicator",
                        "waterrights_stress_long.csv"),

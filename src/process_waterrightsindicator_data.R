@@ -39,13 +39,13 @@
 #'   WSD columns `wsd_source_id`, `park_unit`, `park_name`, `region`,
 #'   `source_state`, `state`, `water_system_name`, `system_type`,
 #'   `source_longitude` and `source_latitude`, e.g.
-#'   `wavacore::get_wsd(rapid = TRUE)`. Supplies with no `source_state` use
+#'   `npswavacore::get_wsd(rapid = TRUE)`. Supplies with no `source_state` use
 #'   `state`; supplies outside the contiguous US are dropped, as are repeated
 #'   `wsd_source_id`s. Required.
 #' @param gdb_path String. Path to the Aqueduct 4.0 `.gdb`. Stops with an
 #'   error if it doesn't exist. Default:
 #'   `all/aqueduct_v4/Aqueduct40_waterrisk_download_Y2023M07D05/GDB/Aq40_Y2023D07M05.gdb`
-#'   in the shared data folder, see [wavacore::wava_data_path()].
+#'   in the shared data folder, see [npswavacore::wava_data_path()].
 #' @param save Logical. Whether to write the table.
 #'   * `TRUE`: writes `waterrights_stress_long.csv` to `output_dir`, creating
 #'     the folder if needed and replacing an existing file. Stops with an
@@ -92,20 +92,20 @@
 #' @export
 #' @seealso [calc_waterrights_sensitivity()] (uses the baseline rows) and
 #'   [calc_waterrights_exposure()] (uses one future period).
-#' @examplesIf interactive() && file.exists(wavacore::wava_data_path("all", "aqueduct_v4", "Aqueduct40_waterrisk_download_Y2023M07D05", "GDB", "Aq40_Y2023D07M05.gdb"))
+#' @examplesIf interactive() && file.exists(npswavacore::wava_data_path("all", "aqueduct_v4", "Aqueduct40_waterrisk_download_Y2023M07D05", "GDB", "Aq40_Y2023D07M05.gdb"))
 #' # Downloads the state boundaries and reads the global Aqueduct layers, so
 #' # it needs internet and takes several minutes
-#' ws <- wavacore::get_wsd(park = c("ZION", "ROMO"))
+#' ws <- npswavacore::get_wsd(park = c("ZION", "ROMO"))
 #' stress <- process_waterrightsindicator_data(ws, save = FALSE)
 #' table(stress$period, stress$rcp)
 
 process_waterrightsindicator_data <- function(
     water_supplies,
-    gdb_path          = wavacore::wava_data_path("all", "aqueduct_v4",
+    gdb_path          = npswavacore::wava_data_path("all", "aqueduct_v4",
                              "Aqueduct40_waterrisk_download_Y2023M07D05", "GDB",
                              "Aq40_Y2023D07M05.gdb"),
     save              = TRUE,
-    output_dir        = wavacore::wava_data_path("rapid", "inputs", "WaterRightsIndicator"),
+    output_dir        = npswavacore::wava_data_path("rapid", "inputs", "WaterRightsIndicator"),
     save_intermediate = TRUE,
     verbose           = TRUE,
     quiet_warnings    = TRUE) {

@@ -38,9 +38,9 @@
 #'   `altered_water_supplies`, `interagency_report/generated_products` and
 #'   `NOAA_SLRV_2022/inundation_data` folders, which receive the intermediate
 #'   files. Default: `all/coast_comp_data` in the shared data folder, see
-#'   [wavacore::wava_data_path()].
+#'   [npswavacore::wava_data_path()].
 #' @param water_supplies sf object. The water supplies, as points, e.g. from
-#'   [wavacore::get_wsd()]. All columns are kept; [calc_inundation_exposure()]
+#'   [npswavacore::get_wsd()]. All columns are kept; [calc_inundation_exposure()]
 #'   needs `wsd_source_id` and `park_unit`. Required.
 #' @param save Logical. Whether to write the final table.
 #'   * `TRUE`: writes `buff_ws_inun_regions.gpkg` to `output_dir`, replacing
@@ -70,14 +70,14 @@
 #' # Not run: downloads several GB from NOAA, overwrites the intermediate
 #' # files in coast_dir_path, and deletes and re-downloads
 #' # output_dir/Extent_Rasters. Point both folders at a copy to try it.
-#' ws <- wavacore::get_wsd(rapid = TRUE)
+#' ws <- npswavacore::get_wsd(rapid = TRUE)
 #' inundation_inputs <- process_inundation_data(water_supplies = ws, save = TRUE)
 #' }
 
-process_inundation_data <- function(coast_dir_path = wavacore::wava_data_path("all", "coast_comp_data"),
+process_inundation_data <- function(coast_dir_path = npswavacore::wava_data_path("all", "coast_comp_data"),
                                     water_supplies,
                                     save       = TRUE,
-                                    output_dir = wavacore::wava_data_path("rapid", "inputs", "coast_comp")) {
+                                    output_dir = npswavacore::wava_data_path("rapid", "inputs", "coast_comp")) {
   
   stopifnot("save is TRUE but output_dir not provided" = !save || !is.null(output_dir))
   

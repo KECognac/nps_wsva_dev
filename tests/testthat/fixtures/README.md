@@ -27,7 +27,7 @@ reference, and these tests either retire or become wavarapid's own
 regression baseline.
 
 The setup is copied from wavadeepdive's golden tests (which added `reads` and
-`keep` to wavacore's), with three more pieces, described below:
+`keep` to npswavacore's), with three more pieces, described below:
 - saved inputs;
 - `args` that can be a function;
 - `golden_run()`, which stops a case from writing outside `tempdir()`.
@@ -43,7 +43,7 @@ The setup is copied from wavadeepdive's golden tests (which added `reads` and
     them with the old code (the old `get_wsd(rapid = TRUE)`) and saves them
     to `golden/inputs.rds`; `test-golden.R` reads them from there. So both
     runs use the identical inputs, and the test doesn't call `get_wsd()`,
-    which wavacore's golden tests cover. The sites are listed, with the
+    which npswavacore's golden tests cover. The sites are listed, with the
     reason for each, in `golden_site_ids`.
   - **Cases** (`golden_cases`): each has a function, its arguments, and
     whether it needs the shared data folder or internet. `args` is a list,

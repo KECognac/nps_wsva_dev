@@ -8,7 +8,7 @@
 #'
 #' @param water_supplies sf object. The water supply areas, as polygons with
 #'   `wsd_source_id`, `park_unit` and `park_name` columns, e.g. points from
-#'   [wavacore::get_wsd()] buffered with [sf::st_buffer()]. Required.
+#'   [npswavacore::get_wsd()] buffered with [sf::st_buffer()]. Required.
 #' @param whp_raster String. Path to the WHP raster: the continuous raster
 #'   for `whp_type = "raw"`, or the classified one (e.g.
 #'   `all/usfs_fire/whp2023_GeoTIF/whp2023_cls_conus.tif` in the shared data
@@ -51,13 +51,13 @@
 #' @export
 #' @seealso [calc_fire_exposure()] for the projected change in fire
 #'   probability; [calc_vulnerability_index()].
-#' @examplesIf file.exists(wavacore::wava_data_path("all", "usfs_fire", "whp2023_GeoTIF", "whp2023_cls_conus.tif"))
+#' @examplesIf file.exists(npswavacore::wava_data_path("all", "usfs_fire", "whp2023_GeoTIF", "whp2023_cls_conus.tif"))
 #' # 4 km buffers around the water supplies, as in the rapid workflow
-#' ws <- wavacore::get_wsd(park = "ZION")
+#' ws <- npswavacore::get_wsd(park = "ZION")
 #' ws_buffer <- sf::st_buffer(sf::st_transform(ws, 32616), dist = 4000)
 #' fire_sen <- calc_fire_sensitivity(
 #'   ws_buffer,
-#'   whp_raster = wavacore::wava_data_path("all", "usfs_fire", "whp2023_GeoTIF",
+#'   whp_raster = npswavacore::wava_data_path("all", "usfs_fire", "whp2023_GeoTIF",
 #'                                         "whp2023_cls_conus.tif"),
 #'   whp_type = "cat"
 #' )

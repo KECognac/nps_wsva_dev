@@ -23,11 +23,11 @@
 #'
 #' @param water_supplies sf object. The water supplies, as points with
 #'   `wsd_source_id`, `park_unit` and `park_name` columns, e.g. from
-#'   [wavacore::get_wsd()]. Required.
+#'   [npswavacore::get_wsd()]. Required.
 #' @param wtd_path String. Path to the CONUS WTD raster (meters). Can also be
 #'   a `/vsicurl/` URL, so GDAL reads only the parts it needs. Default: the
 #'   copy downloaded from Zenodo, in `all/groundwater_sensitivity` in the
-#'   shared data folder (about 37 GB), see [wavacore::wava_data_path()].
+#'   shared data folder (about 37 GB), see [npswavacore::wava_data_path()].
 #' @param start_buffer_m Numeric. The first search radius, in meters, for
 #'   points with no value. Default: `500`.
 #' @param max_buffer_m Numeric. The largest search radius, in meters. Points
@@ -58,20 +58,20 @@
 #' @export
 #' @seealso [calc_groundwater_depth_sensitivity()], which uses
 #'   `wtd_all_sites.csv` where a supply has no recorded well depth.
-#' @examplesIf interactive() && file.exists(wavacore::wava_data_path("all", "groundwater_sensitivity", "wtd_mean_estimate_RF_additional_inputs_dummy_drop0LP_1s_CONUS2_m_v_20240813.tif"))
+#' @examplesIf interactive() && file.exists(npswavacore::wava_data_path("all", "groundwater_sensitivity", "wtd_mean_estimate_RF_additional_inputs_dummy_drop0LP_1s_CONUS2_m_v_20240813.tif"))
 #' # The default raster is about 37 GB, so the first read takes a long time
-#' ws <- wavacore::get_wsd(park = "ZION")
+#' ws <- npswavacore::get_wsd(park = "ZION")
 #' wtd <- process_groundwater_depth(ws)
 #' wtd
 
 process_groundwater_depth <- function(
     water_supplies,
-    wtd_path       = wavacore::wava_data_path("all", "groundwater_sensitivity",
+    wtd_path       = npswavacore::wava_data_path("all", "groundwater_sensitivity",
                            "wtd_mean_estimate_RF_additional_inputs_dummy_drop0LP_1s_CONUS2_m_v_20240813.tif"),
     start_buffer_m = 500,
     max_buffer_m   = 50000,
     save           = FALSE,
-    output_dir     = wavacore::wava_data_path("rapid", "inputs", "groundwater_depth"),
+    output_dir     = npswavacore::wava_data_path("rapid", "inputs", "groundwater_depth"),
     verbose        = TRUE) {
 
   stopifnot(

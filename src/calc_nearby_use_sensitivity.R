@@ -17,11 +17,11 @@
 #'
 #' @param water_supplies sf object. The water supplies, as points with
 #'   `wsd_source_id`, `park_unit` and `park_name` columns, e.g. from
-#'   [wavacore::get_wsd()]. Required.
+#'   [npswavacore::get_wsd()]. Required.
 #' @param data_dir String. The folder with `pub_irr_monthly_avg_2000_2020.csv`
 #'   and `tep_monthly_avg_2000_2020.csv`. Default:
 #'   `Latest county-level data/water_demand_projections` in the shared data
-#'   folder, see [wavacore::wava_data_path()].
+#'   folder, see [npswavacore::wava_data_path()].
 #' @param save Logical. Whether to write the results to a CSV file.
 #'   * `TRUE`: writes `nearby_use_sensitivity_<date>.csv`, named with today's
 #'     date, to `output_dir`. The folder must already exist; `output_dir`
@@ -51,14 +51,14 @@
 #' @export
 #' @seealso [calc_nearby_use_exposure()] for the projected change;
 #'   [calc_wta_sensitivity()] for watershed water stress.
-#' @examplesIf interactive() && dir.exists(wavacore::wava_data_path("Latest county-level data", "water_demand_projections"))
+#' @examplesIf interactive() && dir.exists(npswavacore::wava_data_path("Latest county-level data", "water_demand_projections"))
 #' # Downloads the county boundaries, so it needs internet
-#' ws <- wavacore::get_wsd(park = c("ZION", "ROMO"))
+#' ws <- npswavacore::get_wsd(park = c("ZION", "ROMO"))
 #' use_sen <- calc_nearby_use_sensitivity(ws)
 #' use_sen[, c("wsd_source_id", "fips", "raw_avg_nearby_use_per_km2")]
 
 calc_nearby_use_sensitivity <- function(water_supplies,
-                                        data_dir = wavacore::wava_data_path("Latest county-level data", "water_demand_projections"),
+                                        data_dir = npswavacore::wava_data_path("Latest county-level data", "water_demand_projections"),
                                         save = FALSE,
                                         output_dir = NULL,
                                         verbose = TRUE,

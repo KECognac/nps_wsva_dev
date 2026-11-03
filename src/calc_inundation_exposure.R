@@ -27,7 +27,7 @@
 #'   rasters, in one subfolder per state (`<state>/<file>`). Default:
 #'   `rapid/inputs/coast_comp/Extent_Rasters` in the shared data folder,
 #'   which is where [process_inundation_data()] downloads them, see
-#'   [wavacore::wava_data_path()].
+#'   [npswavacore::wava_data_path()].
 #' @param coast_distances String. Path to `coastal_site_geometry.csv` from
 #'   [process_coastal_geometry()]; only `coast_dist_m` is used. Stops with an
 #'   error if the file doesn't exist. Default:
@@ -71,11 +71,11 @@
 #'   downloads the rasters; [process_coastal_geometry()];
 #'   [calc_storm_surge_exposure()] and [calc_swi_exposure()], the other
 #'   coastal indicators.
-#' @examplesIf interactive() && file.exists(wavacore::wava_data_path("rapid", "inputs", "coast_comp", "buff_ws_inun_regions.gpkg"))
+#' @examplesIf interactive() && file.exists(npswavacore::wava_data_path("rapid", "inputs", "coast_comp", "buff_ws_inun_regions.gpkg"))
 #' # The scenarios, joined onto the supplies of one coastal park, as in the
 #' # rapid workflow
-#' ws <- wavacore::get_wsd(park = "BISC")
-#' scenarios <- sf::st_read(wavacore::wava_data_path("rapid", "inputs", "coast_comp",
+#' ws <- npswavacore::get_wsd(park = "BISC")
+#' scenarios <- sf::st_read(npswavacore::wava_data_path("rapid", "inputs", "coast_comp",
 #'                                                   "buff_ws_inun_regions.gpkg"),
 #'                          quiet = TRUE)
 #' scenarios <- scenarios[!is.na(scenarios$proj_file), names(scenarios) != "park_unit"]
@@ -87,8 +87,8 @@
 #'             "inun_change", "inun_centroid_change")]
 
 calc_inundation_exposure <- function(ws_scenarios,
-                                     inundation_raster_data_dir = wavacore::wava_data_path("rapid", "inputs", "coast_comp", "Extent_Rasters"),
-                                     coast_distances = wavacore::wava_data_path("rapid", "inputs", "coast_comp", "coastal_site_geometry.csv"),
+                                     inundation_raster_data_dir = npswavacore::wava_data_path("rapid", "inputs", "coast_comp", "Extent_Rasters"),
+                                     coast_distances = npswavacore::wava_data_path("rapid", "inputs", "coast_comp", "coastal_site_geometry.csv"),
                                      save = FALSE,
                                      output_dir = NULL,
                                      verbose = TRUE) {

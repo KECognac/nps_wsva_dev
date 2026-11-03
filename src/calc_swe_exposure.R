@@ -14,14 +14,14 @@
 #' that show a decrease.
 #'
 #' @param water_supplies sf object. The water supplies, with a
-#'   `wsd_source_id` column, e.g. from [wavacore::get_wsd()]. Only their IDs
+#'   `wsd_source_id` column, e.g. from [npswavacore::get_wsd()]. Only their IDs
 #'   are used, to pick rows from the processed files, so they must be the IDs
 #'   the files were made with. Required.
 #' @param swe_data String. The folder of processed snow parquet files
 #'   from [process_loca2_mwbm()]. Stops with an error if no files are left
 #'   after the `hindcast` filter. Default:
 #'   `rapid/inputs/loca2_swe_water_supplies` in the shared data folder,
-#'   see [wavacore::wava_data_path()].
+#'   see [npswavacore::wava_data_path()].
 #' @param hindcast Logical. Where the historical period comes from.
 #'   * `TRUE`: each model's own historical run, so the change is measured
 #'     within each model. Historical years after the historical run ends
@@ -79,17 +79,17 @@
 #'   water supply variables; [process_loca2_mwbm()], which makes the input
 #'   files;
 #'   [calc_vulnerability_index()].
-#' @examplesIf interactive() && dir.exists(wavacore::wava_data_path("rapid", "inputs", "loca2_swe_water_supplies"))
+#' @examplesIf interactive() && dir.exists(npswavacore::wava_data_path("rapid", "inputs", "loca2_swe_water_supplies"))
 #' # Reads every processed snow file (about 2.5 GB), so it takes several
 #' # minutes even for one park
-#' ws <- wavacore::get_wsd(park = "ROMO")
+#' ws <- npswavacore::get_wsd(park = "ROMO")
 #' swe_exp <- calc_swe_exposure(ws,
 #'                              historical = c(1980, 2010),
 #'                              future = c(2035, 2065))
 #' swe_exp
 
 calc_swe_exposure <- function(water_supplies,
-                              swe_data = wavacore::wava_data_path("rapid", "inputs", "loca2_swe_water_supplies/"),
+                              swe_data = npswavacore::wava_data_path("rapid", "inputs", "loca2_swe_water_supplies/"),
                               hindcast = TRUE,
                               historical,
                               future,

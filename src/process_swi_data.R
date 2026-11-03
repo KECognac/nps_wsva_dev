@@ -22,7 +22,7 @@
 #'   `WatershedID`, `lat`, `lon` and `Case_C` columns). Stops with an error if
 #'   the file doesn't exist. Default: `output_data.txt` in
 #'   `all/coast_comp_data/adams_swi_2024/data` in the shared data folder, see
-#'   [wavacore::wava_data_path()].
+#'   [npswavacore::wava_data_path()].
 #' @param save Logical. Whether to write the points to a GeoPackage.
 #'   * `TRUE`: writes `swi_points.gpkg` to `output_dir`, creating the folder
 #'     if needed and replacing an existing file. Stops with an error if
@@ -44,16 +44,16 @@
 #' @seealso [calc_swi_exposure()], which assigns these values to water
 #'   supplies; [process_coastal_geometry()], which makes the distance-to-coast
 #'   table that exposure function also needs.
-#' @examplesIf file.exists(wavacore::wava_data_path("all", "coast_comp_data", "adams_swi_2024", "data", "output_data.txt"))
+#' @examplesIf file.exists(npswavacore::wava_data_path("all", "coast_comp_data", "adams_swi_2024", "data", "output_data.txt"))
 #' # Read the points without writing the GeoPackage
 #' swi <- process_swi_data(save = FALSE)
 #' nrow(swi)
 #' summary(swi$Case_C)
 
 process_swi_data <- function(
-    data_path  = wavacore::wava_data_path("all", "coast_comp_data", "adams_swi_2024", "data", "output_data.txt"),
+    data_path  = npswavacore::wava_data_path("all", "coast_comp_data", "adams_swi_2024", "data", "output_data.txt"),
     save       = TRUE,
-    output_dir = wavacore::wava_data_path("rapid", "inputs", "swi")) {
+    output_dir = npswavacore::wava_data_path("rapid", "inputs", "swi")) {
 
   stopifnot("output_data.txt not found \u2014 check data_path" = file.exists(data_path),
             "save is TRUE but output_dir not provided"    = !save || !is.null(output_dir))

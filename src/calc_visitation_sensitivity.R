@@ -3,7 +3,7 @@
 #' @description
 #' Calculates the trend in annual recreation visits for each park unit in
 #' `water_supplies`, from the NPS visitation statistics API through
-#' [wavacore::getUnitVisitation()], so it needs internet. The trend is Sen's
+#' [npswavacore::get_unit_visitation()], so it needs internet. The trend is Sen's
 #' slope ([trend::sens.slope()]), tested with Mann-Kendall
 #' ([trend::mk.test()]), for parks with at least 3 years. A few WSD codes are
 #' looked up under a different visitation code (ANAC and NACE as NCPE, NAMA
@@ -14,7 +14,7 @@
 #'
 #' @param water_supplies Data frame or sf object. The water supplies, with
 #'   `wsd_source_id` and `park_unit` columns, e.g. from
-#'   [wavacore::get_wsd()]. One request is made per park unit. Stops with an
+#'   [npswavacore::get_wsd()]. One request is made per park unit. Stops with an
 #'   error if `park_unit` is missing. Required.
 #' @param start_year Integer. The first year of visitation to request.
 #'   Default: `1990`.
@@ -53,10 +53,10 @@
 #'     higher score.
 #' @export
 #' @seealso [calc_visitation_exposure()] for the projected change;
-#'   [wavacore::getUnitVisitation()], which downloads the visitation data.
+#'   [npswavacore::get_unit_visitation()], which downloads the visitation data.
 #' @examplesIf interactive()
 #' # Downloads visitation statistics from the NPS API, so it needs internet
-#' ws <- wavacore::get_wsd(park = c("ZION", "ROMO"))
+#' ws <- npswavacore::get_wsd(park = c("ZION", "ROMO"))
 #' visitation_sen <- calc_visitation_sensitivity(ws, start_year = 1990, end_year = 2024)
 #' visitation_sen[, c("wsd_source_id", "park_unit", "raw_avg_visitation",
 #'                    "raw_scaled_trend_visitation")]
@@ -99,7 +99,7 @@ calc_visitation_sensitivity <- function(water_supplies,
     visitation_code <- unname(visitation_code_crosswalk[park_unit_clean])
     if (is.na(visitation_code)) visitation_code <- park_unit_clean
 
-    visitation <- wavacore::getUnitVisitation(units = visitation_code,
+    visitation <- npswavacore::get_unit_visitation(units = visitation_code,
                                     startYear = start_year,
                                     endYear = end_year)
     

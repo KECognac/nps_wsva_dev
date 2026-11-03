@@ -17,13 +17,13 @@
 #' change is standardized, so the days are not counted twice.
 #'
 #' @param water_supplies sf object. The water supplies, with `wsd_source_id`
-#'   and `park_unit` columns, e.g. from [wavacore::get_wsd()]. Only their IDs
+#'   and `park_unit` columns, e.g. from [npswavacore::get_wsd()]. Only their IDs
 #'   are used, to pick rows from the processed files. Required.
 #' @param period_data String. The folder of parquet files from
 #'   [process_precip_period_data()]. Stops with an error if it doesn't exist
 #'   or the files lack the expected columns. Default:
 #'   `rapid/inputs/loca_cmip6_precip_periods_water_supplies` in the shared
-#'   data folder, see [wavacore::wava_data_path()].
+#'   data folder, see [npswavacore::wava_data_path()].
 #' @param historical Character or numeric vector of 2 years, e.g.
 #'   `c(1980, 2010)`. The first and last year of the historical period, read
 #'   from the historical runs (1950-2014). Required.
@@ -65,8 +65,8 @@
 #' @seealso [calc_dry_period_exposure()], the paired dry spell indicator;
 #'   [calc_wet_period_sensitivity()] for the historical trend;
 #'   [process_precip_period_data()], which makes the input files.
-#' @examplesIf dir.exists(wavacore::wava_data_path("rapid", "inputs", "loca_cmip6_precip_periods_water_supplies"))
-#' ws <- wavacore::get_wsd(park = "ZION")
+#' @examplesIf dir.exists(npswavacore::wava_data_path("rapid", "inputs", "loca_cmip6_precip_periods_water_supplies"))
+#' ws <- npswavacore::get_wsd(park = "ZION")
 #' wet_exp <- calc_wet_period_exposure(ws,
 #'                                     historical = c(1980, 2010),
 #'                                     future = c(2035, 2065))
@@ -75,7 +75,7 @@
 
 calc_wet_period_exposure <- function(
     water_supplies,
-    period_data = wavacore::wava_data_path("rapid", "inputs", "loca_cmip6_precip_periods_water_supplies/"),
+    period_data = npswavacore::wava_data_path("rapid", "inputs", "loca_cmip6_precip_periods_water_supplies/"),
     historical,
     future,
     save = FALSE,

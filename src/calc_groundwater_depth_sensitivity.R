@@ -25,7 +25,7 @@
 #'
 #' @param water_supplies sf object. The water supplies, with
 #'   `wsd_source_id`, `park_unit`, `park_name`, `source_type` and
-#'   `well_depth` (feet) columns, e.g. from [wavacore::get_wsd()]. Stops with
+#'   `well_depth` (feet) columns, e.g. from [npswavacore::get_wsd()]. Stops with
 #'   an error if `source_type` or `well_depth` is missing. Repeated
 #'   `wsd_source_id`s are dropped. Required.
 #' @param groundwater_data String or data frame. The modeled water table
@@ -66,11 +66,11 @@
 #' @seealso [process_groundwater_depth()], which makes `wtd_all_sites.csv`;
 #'   [calc_vulnerability_index()], which uses the depth as
 #'   `sen_source_type`.
-#' @examplesIf file.exists(wavacore::wava_data_path("rapid", "inputs", "groundwater_depth", "wtd_all_sites.csv"))
-#' ws <- wavacore::get_wsd(park = "ZION")
+#' @examplesIf file.exists(npswavacore::wava_data_path("rapid", "inputs", "groundwater_depth", "wtd_all_sites.csv"))
+#' ws <- npswavacore::get_wsd(park = "ZION")
 #' gw_sen <- calc_groundwater_depth_sensitivity(
 #'   ws,
-#'   groundwater_data = wavacore::wava_data_path("rapid", "inputs", "groundwater_depth",
+#'   groundwater_data = npswavacore::wava_data_path("rapid", "inputs", "groundwater_depth",
 #'                                               "wtd_all_sites.csv")
 #' )
 #' gw_sen[, c("wsd_source_id", "raw_groundwater_depth_m",

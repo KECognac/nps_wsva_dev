@@ -23,7 +23,7 @@
 #' @param nc_path String. Path to one NetCDF file, usually from
 #'   `all/loca2_mwbm` in the shared data folder. Required.
 #' @param water_supplies sf object. The water supplies, as points with
-#'   `wsd_source_id` and `park_unit` columns, e.g. from [wavacore::get_wsd()].
+#'   `wsd_source_id` and `park_unit` columns, e.g. from [npswavacore::get_wsd()].
 #'   They are reprojected to the file's CRS if needed. Required.
 #' @param var String. The variable to extract: `"aet"`, `"deficit"`, `"pet"`,
 #'   `"runoff"`, `"snow"`, `"swe"`, `"stor"`, `"pr"`, `"pr_tavg"`, `"tas"`,
@@ -61,10 +61,10 @@
 #' @seealso [calc_runoff_exposure()], [calc_precip_exposure()],
 #'   [calc_swe_exposure()], [calc_temp_exposure()], [process_drought_data()]
 #'   and [calc_loca2_change_summary()], which read the parquet files.
-#' @examplesIf interactive() && dir.exists(wavacore::wava_data_path("all", "loca2_mwbm"))
+#' @examplesIf interactive() && dir.exists(npswavacore::wava_data_path("all", "loca2_mwbm"))
 #' # One runoff file is about 0.5 GB, so this takes a few minutes
-#' ws <- wavacore::get_wsd(park = "ZION")
-#' nc <- wavacore::wava_data_path("all", "loca2_mwbm",
+#' ws <- npswavacore::get_wsd(park = "ZION")
+#' nc <- npswavacore::wava_data_path("all", "loca2_mwbm",
 #'                                "runoff_MWBM_LOCA2.ACCESS-CM2.ssp245.r1i1p1f1_2015-2100.nc")
 #' out_dir <- file.path(tempdir(), "loca2_runoff")
 #' process_loca2_mwbm(nc, ws, var = "runoff",

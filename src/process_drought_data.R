@@ -16,12 +16,12 @@
 #' primary source doesn't have.
 #'
 #' @param water_supplies sf object. The water supplies, with a
-#'   `wsd_source_id` column, e.g. from [wavacore::get_wsd()]. Only their IDs
+#'   `wsd_source_id` column, e.g. from [npswavacore::get_wsd()]. Only their IDs
 #'   are used, to pick rows from the files. Required.
 #' @param precip_data String. The folder of processed precipitation parquet
 #'   files. Stops with an error if no files are left after the `hindcast`
 #'   filter. Default: `rapid/inputs/loca2_precipitation_water_supplies` in
-#'   the shared data folder, see [wavacore::wava_data_path()].
+#'   the shared data folder, see [npswavacore::wava_data_path()].
 #' @param pet_data String. The folder of processed PET parquet files, used
 #'   the same way. Default: `rapid/inputs/loca2_pet_water_supplies` in the
 #'   shared data folder.
@@ -78,10 +78,10 @@
 #' @seealso [calc_drought_exposure()], which calculates SPEI from this table;
 #'   [process_loca2_mwbm()], which makes the parquet files it reads;
 #'   [calc_drought_sensitivity()] for the historical drought indicator.
-#' @examplesIf interactive() && dir.exists(wavacore::wava_data_path("rapid", "inputs", "loca2_pet_water_supplies"))
+#' @examplesIf interactive() && dir.exists(npswavacore::wava_data_path("rapid", "inputs", "loca2_pet_water_supplies"))
 #' # Reads about 9 GB of processed precipitation and PET files, so it takes
 #' # a long time
-#' ws <- wavacore::get_wsd(park = "ZION")
+#' ws <- npswavacore::get_wsd(park = "ZION")
 #' drought_monthly <- process_drought_data(ws,
 #'                                         historical = c("1980", "2010"),
 #'                                         future = c("2035", "2065"),
@@ -89,13 +89,13 @@
 #' head(drought_monthly)
 
 process_drought_data <- function(water_supplies,
-                                 precip_data = wavacore::wava_data_path("rapid", "inputs", "loca2_precipitation_water_supplies/"),
-                                 pet_data = wavacore::wava_data_path("rapid", "inputs", "loca2_pet_water_supplies/"),
+                                 precip_data = npswavacore::wava_data_path("rapid", "inputs", "loca2_precipitation_water_supplies/"),
+                                 pet_data = npswavacore::wava_data_path("rapid", "inputs", "loca2_pet_water_supplies/"),
                                  hindcast = TRUE,
                                  historical,
                                  future,
                                  water_year = TRUE,
-                                 output_dir = wavacore::wava_data_path("rapid", "inputs/"),
+                                 output_dir = npswavacore::wava_data_path("rapid", "inputs/"),
                                  save = TRUE,
                                  verbose = TRUE) {
   

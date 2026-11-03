@@ -25,12 +25,12 @@
 #'
 #' @param water_supplies sf object. The water supplies, as points with
 #'   `wsd_source_id`, `park_unit` and `park_name` columns, e.g. from
-#'   [wavacore::get_wsd()]. Required.
+#'   [npswavacore::get_wsd()]. Required.
 #' @param data_dir String. The folder with `pub_irr_monthly_avg_2000_2020.csv`,
 #'   `pub_irr_monthly_avg_2040_2070.csv`, `tep_monthly_avg_2000_2020.csv` and
 #'   `tep_monthly_avg_2040_2070.csv`. Default:
 #'   `Latest county-level data/water_demand_projections` in the shared data
-#'   folder, see [wavacore::wava_data_path()].
+#'   folder, see [npswavacore::wava_data_path()].
 #' @param save Logical. Whether to write the results to a CSV file.
 #'   * `TRUE`: writes `nearby_use_exposure_<date>.csv`, named with today's
 #'     date, to `output_dir`. The folder must already exist; `output_dir`
@@ -83,15 +83,15 @@
 #' @seealso [calc_nearby_use_sensitivity()] for historical use;
 #'   [calc_wta_exposure()] for the change in watershed water stress from the
 #'   same projections.
-#' @examplesIf interactive() && dir.exists(wavacore::wava_data_path("Latest county-level data", "water_demand_projections"))
+#' @examplesIf interactive() && dir.exists(npswavacore::wava_data_path("Latest county-level data", "water_demand_projections"))
 #' # Downloads the county boundaries and reads about 140 MB of projections,
 #' # so it needs internet and takes a few minutes
-#' ws <- wavacore::get_wsd(park = c("ZION", "ROMO"))
+#' ws <- npswavacore::get_wsd(park = c("ZION", "ROMO"))
 #' use_exp <- calc_nearby_use_exposure(ws)
 #' use_exp[, c("wsd_source_id", "fips", "raw_use_change_p90", "data_status")]
 
 calc_nearby_use_exposure <- function(water_supplies,
-                                     data_dir = wavacore::wava_data_path("Latest county-level data", "water_demand_projections"),
+                                     data_dir = npswavacore::wava_data_path("Latest county-level data", "water_demand_projections"),
                                      save = FALSE,
                                      output_dir = NULL,
                                      verbose = TRUE,

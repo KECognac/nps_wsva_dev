@@ -17,7 +17,7 @@
 #' If a `wsd_source_id` has several rows, their values are averaged.
 #'
 #' @param data sf object. The water supplies, as points with `wsd_source_id`,
-#'   `park_unit` and `park_name` columns, e.g. from [wavacore::get_wsd()].
+#'   `park_unit` and `park_name` columns, e.g. from [npswavacore::get_wsd()].
 #'   Required.
 #' @param dist Numeric. The buffer radius in meters, applied in UTM zone 16N
 #'   (EPSG 32616).
@@ -57,7 +57,7 @@
 #'   `sen_flood_risk`.
 #' @examplesIf interactive()
 #' # Queries the FEMA flood map service, so it needs internet
-#' ws <- wavacore::get_wsd(park = "ZION")
+#' ws <- npswavacore::get_wsd(park = "ZION")
 #' flood_sen <- calc_flood_risk(ws, dist = 4000)
 #' flood_sen
 

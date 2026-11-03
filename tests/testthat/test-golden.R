@@ -35,7 +35,7 @@ inputs <- readRDS(inputs_file)
 
 data_folder_reason <- function(case, missing) {
   paste0(case$id, ": no ", paste(missing, collapse = ", "),
-         " in the data folder \"", wavacore::wava_data_dir(), "\" (",
+         " in the data folder \"", npswavacore::wava_data_dir(), "\" (",
          data_dir_source(), ")")
 }
 
@@ -53,7 +53,7 @@ golden_env_changes <- function() {
       R = as.character(getRversion()),
       package = tryCatch(as.character(utils::packageVersion(env$name[i])),
                          error = function(e) "not installed"),
-      "data file" = golden_checksum(wavacore::wava_data_path(env$name[i]))
+      "data file" = golden_checksum(npswavacore::wava_data_path(env$name[i]))
     )
   }, character(1))
   changed <- env$value != now
@@ -108,7 +108,7 @@ for (case in golden_cases) {
                 paste0(case$id, ": golden file missing: ", golden_file,
                        "; run tests/testthat/fixtures/make_golden.R"))
     if ("data" %in% case$needs) {
-      missing <- case$reads[!file.exists(wavacore::wava_data_path(case$reads))]
+      missing <- case$reads[!file.exists(npswavacore::wava_data_path(case$reads))]
       skip_if(length(missing) > 0, data_folder_reason(case, missing))
     }
     if ("internet" %in% case$needs) {

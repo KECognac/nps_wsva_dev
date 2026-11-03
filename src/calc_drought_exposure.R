@@ -22,7 +22,7 @@
 #' ...)`, so there is no `hindcast` argument here.
 #'
 #' @param water_supplies sf object. The water supplies, with `wsd_source_id`
-#'   and `park_unit` columns, e.g. from [wavacore::get_wsd()]. Only their IDs
+#'   and `park_unit` columns, e.g. from [npswavacore::get_wsd()]. Only their IDs
 #'   are used, to pick rows from `drought_data`. Stops with an error if none
 #'   match. Required.
 #' @param drought_data String. Path to the monthly drought parquet file from
@@ -30,7 +30,7 @@
 #'   that function writes. Default:
 #'   `rapid/inputs/loca2_drought_monthly_1980-2010_2035-2065_hindcast-TRUE.parquet`
 #'   in the shared data folder (about 1.3 GB), see
-#'   [wavacore::wava_data_path()].
+#'   [npswavacore::wava_data_path()].
 #' @param spei_scale Integer. The SPEI accumulation scale in months, passed
 #'   to [SPEI::spei()]. Each period is read with `spei_scale - 1` extra
 #'   months before it so its first month has a full window. Must be a whole
@@ -87,10 +87,10 @@
 #' @export
 #' @seealso [process_drought_data()], which makes `drought_data`;
 #'   [calc_drought_sensitivity()] for the historical trend.
-#' @examplesIf interactive() && file.exists(wavacore::wava_data_path("rapid", "inputs", "loca2_drought_monthly_1980-2010_2035-2065_hindcast-TRUE.parquet"))
+#' @examplesIf interactive() && file.exists(npswavacore::wava_data_path("rapid", "inputs", "loca2_drought_monthly_1980-2010_2035-2065_hindcast-TRUE.parquet"))
 #' # The default drought file is about 1.3 GB, and SPEI is fitted for every
 #' # model run, so this takes several minutes
-#' ws <- wavacore::get_wsd(park = "ZION")
+#' ws <- npswavacore::get_wsd(park = "ZION")
 #' drought_exp <- calc_drought_exposure(ws,
 #'                                      spei_scale = 12,
 #'                                      spei_inf_cap = 3,
@@ -100,7 +100,7 @@
 #'                 "raw_spei_models_showing_decrease")]
 
 calc_drought_exposure <- function(water_supplies,
-                                  drought_data = wavacore::wava_data_path("rapid", "inputs", "loca2_drought_monthly_1980-2010_2035-2065_hindcast-TRUE.parquet"),
+                                  drought_data = npswavacore::wava_data_path("rapid", "inputs", "loca2_drought_monthly_1980-2010_2035-2065_hindcast-TRUE.parquet"),
                                   spei_scale = 12,
                                   spei_inf_cap = 4,
                                   historical,

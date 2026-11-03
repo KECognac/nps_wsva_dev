@@ -24,7 +24,7 @@
 #'
 #' @param water_supplies sf object. The water supplies, as points with
 #'   `wsd_source_id`, `park_unit` and `park_name` columns, e.g. from
-#'   [wavacore::get_wsd()]. Required.
+#'   [npswavacore::get_wsd()]. Required.
 #' @param storm_surge_stations String or sf object. The stations from
 #'   [process_storm_surge_data()].
 #'   * String: path to `storm_surge_RP10_muis_2023.gpkg`, e.g. in
@@ -42,7 +42,7 @@
 #'   * Data frame: the same table, already read.
 #'
 #'   Default: `rapid/inputs/coast_comp/coastal_site_geometry.csv` in the
-#'   shared data folder, see [wavacore::wava_data_path()].
+#'   shared data folder, see [npswavacore::wava_data_path()].
 #' @param save Logical. Whether to write the results to a CSV file.
 #'   * `TRUE`: writes `storm_surge_sensitivity_<date>.csv`, named with today's date, to
 #'     `output_dir`, creating the folder if needed. Stops with an error if
@@ -72,18 +72,18 @@
 #'   [process_storm_surge_data()] and [process_coastal_geometry()], which make
 #'   the inputs; [calc_inundation_exposure()] and [calc_swi_exposure()], the
 #'   coastal exposure indicators.
-#' @examplesIf file.exists(wavacore::wava_data_path("rapid", "inputs", "storm_surge", "storm_surge_RP10_muis_2023.gpkg"))
-#' ws <- wavacore::get_wsd(park = "BISC")
+#' @examplesIf file.exists(npswavacore::wava_data_path("rapid", "inputs", "storm_surge", "storm_surge_RP10_muis_2023.gpkg"))
+#' ws <- npswavacore::get_wsd(park = "BISC")
 #' surge_sen <- calc_storm_surge_sensitivity(
 #'   ws,
-#'   storm_surge_stations = wavacore::wava_data_path("rapid", "inputs", "storm_surge",
+#'   storm_surge_stations = npswavacore::wava_data_path("rapid", "inputs", "storm_surge",
 #'                                                   "storm_surge_RP10_muis_2023.gpkg")
 #' )
 #' surge_sen
 
 calc_storm_surge_sensitivity <- function(water_supplies,
                                          storm_surge_stations,
-                                         coast_geometry = wavacore::wava_data_path("rapid",
+                                         coast_geometry = npswavacore::wava_data_path("rapid",
                                                                "inputs",
                                                                "coast_comp",
                                                                "coastal_site_geometry.csv"),
