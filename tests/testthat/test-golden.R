@@ -1,6 +1,6 @@
-# Compare wavarapid with golden outputs saved from the old code in
+# Compare src/ with golden outputs saved from the old code in
 # nps_water_vulnerability at the pinned commit b62f366, the playground when
-# wavarapid was split out (see fixtures/README.md). A failure means wavarapid
+# the rapid code was split out (see fixtures/README.md). A failure means src/
 # no longer returns exactly what the old code did. Report it; don't regenerate
 # the golden file or loosen the comparison to make it pass.
 #
@@ -18,7 +18,7 @@ golden_dir <- test_path("fixtures", "golden")
 withr::local_collate("C")
 withr::local_options(arrow.use_threads = FALSE)
 
-# No golden files at all (e.g. under R CMD check, or a fresh clone): one skip
+# No golden files at all (e.g. a fresh clone): one skip
 # for the whole file instead of one per case.
 if (length(list.files(golden_dir, pattern = "\\.rds$")) == 0) {
   skip(paste0("no golden files in ", golden_dir, "; run ",
@@ -39,7 +39,7 @@ data_folder_reason <- function(case, missing) {
          data_dir_source(), ")")
 }
 
-# What has changed since the golden files were made, other than wavarapid:
+# What has changed since the golden files were made, other than src/:
 # R, package versions and the shared data, against golden_env.csv. Returns a
 # data frame with one row per change (`item`: "R", "package" or "data file";
 # `name`; `text`), or NULL without golden_env.csv. Shown only when a case

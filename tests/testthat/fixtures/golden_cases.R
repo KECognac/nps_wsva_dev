@@ -1,8 +1,8 @@
 # Cases for the golden comparison between the old code in
-# nps_water_vulnerability (before the split) and wavarapid.
+# nps_water_vulnerability (before the split) and src/ in this repo.
 #
 # Used by make_golden.R, which writes golden/<id>.rds from the old code, and by
-# test-golden.R, which checks that wavarapid returns the identical object.
+# test-golden.R, which checks that src/ returns the identical object.
 # Each case has these fields:
 # `id`: the golden file name.
 # `fun`: the function to call, by name.
@@ -31,7 +31,7 @@ golden_data_path <- function(...) npswavacore::wava_data_path(...)
 
 # The folder a case that writes files writes into, inside tempdir(). Nothing
 # else may be written (see golden_run()).
-golden_out_dir <- function(id) file.path(tempdir(), "wavarapid_golden", id)
+golden_out_dir <- function(id) file.path(tempdir(), "nps_wsva_dev_golden", id)
 
 # Every parquet file a case wrote, by file name, for its `keep`
 golden_read_parquet <- function(id) {
@@ -528,7 +528,7 @@ golden_cases <- local({
 
 # Run one case: build its arguments, make sure it can only write into
 # golden_out_dir(id), call it, and apply its `keep`. Used by make_golden.R
-# (old code) and test-golden.R (wavarapid).
+# (old code) and test-golden.R (src/).
 golden_run <- function(case, inputs) {
   args <- if (is.function(case$args)) case$args(inputs) else case$args
   # A process_* function writes unless save = FALSE (their defaults write into

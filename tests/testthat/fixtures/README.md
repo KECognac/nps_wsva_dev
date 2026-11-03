@@ -1,19 +1,19 @@
 # Golden test fixtures
 
-`test-golden.R` checks that wavarapid returns exactly what the old code in
+`test-golden.R` checks that `src/` returns exactly what the old code in
 `nps_water_vulnerability` returned before the split.
 
 ## The baseline: `nps_water_vulnerability` at `b62f366`
 
 We chose one commit of the playground as the reference: `b62f366`, its
-`upstream/main` when wavarapid was split out (2026-10-20). The golden files
+`upstream/main` when the rapid code was split out (2026-10-20). The golden files
 always come from that commit, even after the playground changes.
 `make_golden.R` extracts `setup.R`, `src/` and
 `rapid_app/calc_vulnerability_index.R` from that commit with `git archive`,
 whatever the local clone is on. The commit is set in one place,
 `golden_commit` at the top of `make_golden.R`.
 
-The vulnerability index has two old versions at that commit. wavarapid's
+The vulnerability index has two old versions at that commit. This repo's
 `calc_vulnerability_index()` and `minmax_norm()` came from the app's
 version, `rapid_app/calc_vulnerability_index.R`, the same file as in
 `nps_wsva_app`. `src/rapid/calc_vulnerability_index.R` is an older version
@@ -23,7 +23,7 @@ sources the app's file afterwards. Nothing else in the old `src/` calls
 
 This is a temporary arrangement for checking the move out of the playground.
 Once development has moved off the playground, `b62f366` stops being the
-reference, and these tests either retire or become wavarapid's own
+reference, and these tests either retire or become this repo's own
 regression baseline.
 
 The setup is copied from wavadeepdive's golden tests (which added `reads` and
@@ -97,14 +97,14 @@ The setup is copied from wavadeepdive's golden tests (which added `reads` and
   - **Single-threaded arrow reads** (`options(arrow.use_threads = FALSE)`).
     With threads, arrow returns rows in a varying order, and
     `calc_loca2_change_summary()` changes in the last bits from run to run,
-    in the old code and in wavarapid alike (`issues.md` Q40).
+    in the old code and in `src/` alike (`issues.md` Q40).
 
   Both were found on 2026-10-27, when the first golden run (made without these
   settings) failed on exactly those two cases.
 - `golden/`: the saved results. Not in git for now; whether the outputs can go
   in this public repo is an open question for the team.
 
-To create the golden files, from the wavarapid repo root in a fresh R session
+To create the golden files, from the repo root in a fresh R session
 (the clone needs commit `b62f366` and its `data` link; the script doesn't
 change the clone):
 
@@ -119,24 +119,24 @@ file for their variable, several GB each (precipitation 5.8 GB, temperature
 the first time, about 27 GB. Use "Free up space" on those folders afterwards
 to get the disk space back.
 
-To run the comparison, point wavarapid at the same data folder the
-playground's `data` link points to:
+To run the comparison, point `npswavacore` at the same data folder the
+playground's `data` link points to, from the repo root:
 
 ```sh
-WAVA_DATA_DIR="/path/to/shared/data" Rscript -e 'devtools::test(filter = "golden")'
+WAVA_DATA_DIR="/path/to/shared/data" Rscript -e 'testthat::test_dir("tests/testthat", filter = "golden")'
 ```
 
 A few cases download live data, and those sources change: FEMA flood zones,
 NPS visitation, county and state boundaries (tigris), and USGS point
 elevations. Run the comparison soon after making the golden files. Later
-failures may come from the source rather than the package (see below).
+failures may come from the source rather than `src/` (see below).
 
 The comparison is `expect_identical()`. Every skip says which case it is and
 what is missing:
 
 - no golden files at all: one skip for the whole file, saying to run
-  `make_golden.R` (this is what `R CMD check` shows, because `golden/` is in
-  `.Rbuildignore`);
+  `make_golden.R` (this is what a fresh clone shows, because `golden/` isn't
+  in git);
 - no `inputs.rds`: one skip for the whole file, saying to run `make_golden.R`;
 - one golden file missing: `<case>: golden file missing: <path>`;
 - no data: `<case>: no <missing reads> in the data folder "<path>"`, plus
@@ -158,19 +158,19 @@ After making the golden files, check that the visitation results have values
 for all four parks.
 
 If a test fails, don't regenerate the golden file or loosen the comparison:
-find out why the output changed first. A failure can come from wavarapid, or
+find out why the output changed first. A failure can come from `src/`, or
 from something else that changed since the golden run: an R or package
 upgrade, a change to the shared data, or a live source. The failure message
 lists the R, package and data changes it finds against `golden_env.csv`, and
 names the download if the case has one. To find the cause:
 
-1. Run `make_golden.R` from a scratch copy of wavarapid (so the real
+1. Run `make_golden.R` from a scratch copy of this repo (so the real
    `golden/` stays as it is) to rebuild the golden files with today's
    packages, data and downloads.
 2. Compare the fresh files with the saved ones (`identical()`).
 3. If they are identical, the old code still gives the saved output, so the
-   change is in wavarapid. If they differ, the change came from packages,
-   data or a download, not from wavarapid.
+   change is in `src/`. If they differ, the change came from packages,
+   data or a download, not from `src/`.
 
 ## Not covered
 

@@ -1,12 +1,12 @@
 # Write the golden files for test-golden.R from the OLD code in
 # nps_water_vulnerability, as it was before the split.
 #
-# Run from the wavarapid repo root, in a fresh R session (not with wavarapid
-# loaded):
+# Run from the repo root, in a fresh R session (not after sourcing this repo's
+# setup.R):
 #   Rscript tests/testthat/fixtures/make_golden.R ../nps_water_vulnerability
 #
 # The baseline is pinned to one commit, `golden_commit` below: upstream/main of
-# nps_water_vulnerability when wavarapid was split out (2026-10-20). The golden
+# nps_water_vulnerability when the rapid code was split out (2026-10-20). The golden
 # files always come from that commit, whatever the playground clone is on, so
 # later changes to the playground don't move the baseline. The script extracts
 # that commit's setup.R, src/ and rapid_app/calc_vulnerability_index.R into a
@@ -14,7 +14,7 @@
 # playground's `data` folder into it, and sources setup.R there as the old
 # workflow did (about 70 packages plus every file in src/).
 #
-# It then sources rapid_app/calc_vulnerability_index.R. wavarapid's
+# It then sources rapid_app/calc_vulnerability_index.R. This repo's
 # calc_vulnerability_index() and minmax_norm() came from that file (the app's
 # version), not from the older src/rapid/calc_vulnerability_index.R that
 # setup.R sources. Nothing else in the old src/ calls minmax_norm().
@@ -48,9 +48,6 @@ fixtures <- normalizePath(file.path("tests", "testthat", "fixtures"),
                           mustWork = TRUE)
 golden_dir <- file.path(fixtures, "golden")
 
-if ("wavarapid" %in% loadedNamespaces()) {
-  stop("wavarapid is loaded; run this in a fresh R session")
-}
 if (!dir.exists(file.path(old_repo, "data"))) {
   stop("no data folder or link in ", old_repo)
 }
