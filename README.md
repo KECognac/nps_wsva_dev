@@ -1,46 +1,90 @@
-# wavarapid
+# nps_wsva_dev
 
-Indicator functions for the rapid, nationwide Water Vulnerability Analytics
-(WaVA) water supply vulnerability assessment of National Park Service (NPS)
-units.
+**Development repo for the NPS Water Supply Vulnerability Assessment (WSVA) App**
 
-## What is in it
+The rapid, nationwide water supply vulnerability assessment of National Park
+Service (NPS) units: the indicator functions, the workflow that runs them, and
+the notebooks used to explore them. It produces the indicators and the data that
+[`nps_wsva_app`](https://github.com/Water-Vulnerability-Analytics/nps_wsva_app)
+reads.
 
-| Function family | What it does |
-| --- | --- |
-| `calc_*_exposure()` | Exposure indicators: change in a hazard or water supply condition at each water supply (runoff, precipitation, snow, drought, fire, storm surge, sea level rise, saltwater intrusion, nearby use, water rights, and others) |
-| `calc_*_sensitivity()` | Sensitivity indicators: how sensitive a water supply is to those changes |
-| `process_*()` | Prepare the input data that some indicators need (coastal geometry, storm surge, drought, groundwater depth, and others) |
-| `add_standardized_indicators()` | Adds normalized and ranked columns to an indicator table |
-| `calc_vulnerability_index()` | Combines the raw indicators into factors, components and the total vulnerability index. This is the same function the app uses. |
+Part of [Water Vulnerability Analytics (WaVA)](https://github.com/Water-Vulnerability-Analytics).
+The code was split out of
+[`nps_water_vulnerability`](https://github.com/Water-Vulnerability-Analytics/nps_water_vulnerability)
+with its commit history. This repo is not an R package.
 
-## Install
+## Contents
 
-`wavarapid` depends on [`wavacore`](https://github.com/Water-Vulnerability-Analytics/wavacore).
+- `setup.R`: installs and attaches the packages, and sources everything in `src/`
+- `rapid_data_processing.Rmd`: preprocesses large datasets (run once, or when
+  the source data changes)
+- `rapid_workflow.Rmd`: calculates the indicators
+- `app_data_prep.Rmd`: prepares the indicators and writes them to the app repo
+- `src/`: the functions
+  - `calc_*_exposure()` and `calc_*_sensitivity()`: the indicators
+  - `process_*()`: prepare the input data that some indicators need
+  - `add_standardized_indicators()`: adds normalized and ranked columns to an
+    indicator table
+  - `calc_vulnerability_index()`: combines the indicators into factors,
+    components and the total index, as the app does
+- `Explore/`: notebooks for checking data processing and indicator outputs
+- `tests/`: unit tests, and golden tests against the code from before the split
+- `.claude/agents/`: Claude Code agents for building a new indicator
 
-```r
-# install.packages("remotes")
-remotes::install_github("Water-Vulnerability-Analytics/wavarapid")
+## Getting started
+
+Clone this repo next to `nps_wsva_app`. `app_data_prep.Rmd` and one Explore
+notebook use `../nps_wsva_app/app_data`.
+
+The Rmds read their inputs from the shared WaVA data folder, which is not in
+this repo. Link it into the repo root as `data`:
+
+```bash
+ln -s "/path/to/shared/data" data
 ```
 
-## Data
+Then, from the repo root in R:
 
-The indicator functions read their inputs from the shared WaVA data folder,
-which is not part of this repository. The default paths are built with
-`wavacore::wava_data_path()`, which looks for the folder in this order:
-`options(wava.data_dir = ...)`, the `WAVA_DATA_DIR` environment variable, then
-a folder called `data` in the working directory. Every input and output path
-is also an argument, so you can pass your own.
+```r
+source("setup.R")
+```
+
+This installs any missing packages, including
+[`npswavacore`](https://github.com/Water-Vulnerability-Analytics/npswavacore),
+which provides `get_wsd()`, `get_park_system()`, `get_unit_visitation()` and
+`wava_data_path()`. Now run `rapid_data_processing.Rmd` if needed, then
+`rapid_workflow.Rmd` and `app_data_prep.Rmd`.
+
+Default paths in `src/` come from `npswavacore::wava_data_path()`, which looks
+for the data folder in this order: `options(wava.data_dir = ...)`, the
+`WAVA_DATA_DIR` environment variable, then `data` in the working directory.
+Every input and output path is also an argument.
+
+Two packages are needed only by `Explore/explore_temperature_visitation_exposure.Rmd`,
+and `setup.R` doesn't install them:
+[`npswava`](https://github.com/Water-Vulnerability-Analytics/npswava) and
+[`climateR`](https://github.com/mikejohnson51/climateR).
+
+## Running the tests
+
+From the repo root:
+
+```bash
+Rscript -e 'testthat::test_dir("tests/testthat")'
+```
+
+The golden tests skip until you make their files, which aren't in git, and they
+take about half an hour. See
+[`tests/testthat/fixtures/README.md`](tests/testthat/fixtures/README.md).
 
 ## AI Use Disclosure
 
 AI-assisted coding tools (Claude Code, using Anthropic's Claude models) were used
 during development of this repository, beginning in 2026, to help set up the
-package, prepare it for release, write tests, and draft documentation. All
-AI-assisted code and text was reviewed, tested, and validated by the authors,
-who made all design and scientific decisions and remain responsible for the
-content.
+repository, write tests, and draft documentation. All AI-assisted code and text
+was reviewed, tested, and validated by the authors, who made all design and
+scientific decisions and remain responsible for the content.
 
 ## License
 
-MIT. See [LICENSE.md](LICENSE.md).
+MIT. See [LICENSE](LICENSE).
