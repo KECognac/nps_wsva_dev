@@ -12,7 +12,7 @@ source("setup.R")
 Read in park system
 
 ```{r}
-parks <- getParkSystem()
+parks <- get_park_system()
 # read in pre-saved park file
 # parks <- st_read("data/rapid/inputs/park_boundaries_2025-08-14.gpkg")
 ```
@@ -26,7 +26,7 @@ water_supplies <- get_wsd(rapid = TRUE)
 Save water supplies to app data
 
 ```{r}
-#write_csv(water_supplies, "rapid_app/app_data/water_supplies.csv")
+#write_csv(water_supplies, "../nps_wsva_app/app_data/water_supplies.csv")
 ```
 
 *For each water supply point, calculate indicator at point + \~5km buffer.*

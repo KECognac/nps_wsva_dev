@@ -300,7 +300,7 @@ View results for all sites:
 wtd_all_sites <- read_csv(fname)
 
 # Download all parks (for plotting)
-#all_parks <- getParkSystem()
+#all_parks <- get_park_system()
 #all_parks_buffer <- all_parks %>%
 #  st_buffer(4000)
 

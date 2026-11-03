@@ -20,7 +20,7 @@ source("setup.R")
 When a park unit contains multiple locations like the Manhattan Project National Historic Park, centroid creation is inappropriate:
 
 ```{r}
-parks <- getParkSystem()
+parks <- get_park_system()
 
 mapr_centroid <- parks %>%
   filter(UNIT_CODE == "MAPR") %>%
@@ -36,7 +36,7 @@ So, we can "explode" any multipolygon into a single feature. But, some of these 
 
 ```{r}
 # grab CONUS parks
-units_poly <- getParkSystem() %>% 
+units_poly <- get_park_system() %>% 
   # remove non-CONUS
   filter(!is.na(STATE) & !STATE %in% c("AK", "HI", "PR", "AS", "GU", "MP", "VI"),
          # Dry Tortugas not often included in CONUS datasets (too far off the Florida mainland)
@@ -104,7 +104,7 @@ units_clustered <- clustered %>%
   group_by(UNIT_CODE, cluster_id) %>% 
   summarize(do_union = TRUE, .groups = "drop") %>% 
   st_cast("MULTIPOLYGON") %>% 
-  # st_transform(st_crs(getParkSystem())) %>%
+  # st_transform(st_crs(get_park_system())) %>%
   mutate(cluster_id = as.character(cluster_id))
 ```
 

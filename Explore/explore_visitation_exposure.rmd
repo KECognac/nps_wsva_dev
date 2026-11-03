@@ -19,7 +19,7 @@ suppressMessages(source("setup.R"))
 First, load in the water supply database. 
 We are only performing this rapid assessment on CONUS water supplies that are not municipal or hauled water supplies.
 ```{r}
-# parks <- getParkSystem()
+# parks <- get_park_system()
 # read in pre-saved park file
 suppressMessages(parks <- st_read("data/rapid/inputs/park_boundaries_2025-08-14.gpkg"))
 
@@ -73,7 +73,7 @@ Grab visitation across the entire National Park Service so what the trends are l
 ```{r}
 system_visitation <- getParkwideVisitation(startYear = 2010, endYear = 2024) 
 # for single park instead, use this - 
-# system_visitation <- getUnitVisitation(unit = "MISS", startYear = 2010, endYear = 2024) 
+# system_visitation <- get_unit_visitation(unit = "MISS", startYear = 2010, endYear = 2024) 
 
 # seasonal breakdown
 system_visitation <- system_visitation %>%
@@ -271,7 +271,7 @@ units <- parks %>%
   pull(UNIT_CODE)
 
 peak_year_finder <- function(park_unit){
-  park_visitation <- getUnitVisitation(units = park_unit, startYear = 1970, endYear = 2024) %>%
+  park_visitation <- get_unit_visitation(units = park_unit, startYear = 1970, endYear = 2024) %>%
     group_by(UnitCode, Year) %>%
     summarize(RecreationVisitors = sum(RecreationVisitors), .groups = "drop") %>%
     filter(RecreationVisitors == max(RecreationVisitors, na.rm = TRUE)) 
@@ -323,7 +323,7 @@ compare_trend_methods <- function(park_unit,
                                   insufficient_data_threshold = 14 * 12) {
   
   # grab visitation data
-  visitation <- getUnitVisitation(units = park_unit, startYear = 2010, endYear = 2024)
+  visitation <- get_unit_visitation(units = park_unit, startYear = 2010, endYear = 2024)
   
   annual_visitation <- visitation %>%
     group_by(Year) %>%
@@ -593,7 +593,7 @@ top_bottom_cv <- park_visitation %>%
 example_parks_cv_heatmap <- top_bottom_cv %>%
   select(park_unit, park_name, visit_raw_cv_change, rank_group) %>%
   mutate(monthly_data = map(park_unit, ~{
-    visitation <- getUnitVisitation(units = .x, startYear = 2010, endYear = 2024)
+    visitation <- get_unit_visitation(units = .x, startYear = 2010, endYear = 2024)
     
     # Calculate monthly percentages (excluding COVID years)
     monthly_percentages <- visitation %>%
@@ -629,7 +629,7 @@ ggplot(example_parks_cv_heatmap, aes(x = Year, y = factor(Month, levels = 12:1,
 example_parks_cv_trend <- top_bottom_cv %>%
   select(park_unit, park_name, visit_raw_cv_change, rank_group) %>%
   mutate(cv_trend_data = map(park_unit, ~{
-    visitation <- getUnitVisitation(units = .x, startYear = 2010, endYear = 2024)
+    visitation <- get_unit_visitation(units = .x, startYear = 2010, endYear = 2024)
     
     # Calculate monthly percentages (excluding COVID years)
     monthly_pct <- visitation %>%
@@ -737,7 +737,7 @@ top_bottom_growth <- park_visitation %>%
 example_parks_growth <- top_bottom_growth %>%
   select(park_unit, park_name, visit_raw_pct_change) %>%
   mutate(trend_data = map(park_unit, ~{
-    visitation <- getUnitVisitation(units = .x, startYear = 2010, endYear = 2024)
+    visitation <- get_unit_visitation(units = .x, startYear = 2010, endYear = 2024)
     annual_visitation <- visitation %>%
       group_by(Year) %>%
       summarize(total_visitation = sum(RecreationVisitors), .groups = "drop")

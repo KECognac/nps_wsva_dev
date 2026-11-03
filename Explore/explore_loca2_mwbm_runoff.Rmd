@@ -17,7 +17,7 @@ source("setup.R")
 First, we load in the water supply database. We are only performing this rapid assessment on CONUS water supplies that are not municipal or hauled water supplies.
 
 ```{r}
-parks <- getParkSystem()
+parks <- get_park_system()
 # read in pre-saved park file
 # parks <- st_read("data/rapid/inputs/park_boundaries_2025-08-14.gpkg")
 

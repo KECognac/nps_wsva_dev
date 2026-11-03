@@ -491,8 +491,8 @@ standard way to reduce that error, so sensitivity uses the 4-model mean.
 CMCC-CM2-VHR4 stays in that mean because its bias is in the future-vs-reference
 change, not in the reference level.
 
-Both choices are reflected in `src/rapid/calc_storm_surge_exposure.R`,
-`src/rapid/calc_storm_surge_sensitivity.R`, and `rapid_workflow.Rmd`.
+Both choices are reflected in `src/calc_storm_surge_exposure.R`,
+`src/calc_storm_surge_sensitivity.R`, and `rapid_workflow.Rmd`.
 
 # Correlation between exposure and sensitivity
 
@@ -665,7 +665,7 @@ component. Within each side (exposure, sensitivity) it takes the Euclidean
 distance across the normalized indicators in `exp_cols` / `sen_cols` above,
 re-normalized 0-1. That is the same pattern production uses for its own
 multi-indicator factors (`factor_exp_runoff`, `factor_sen_demand`, etc., see
-`src/rapid/calc_vulnerability_index.R`). The two factor scores then combine the
+`src/calc_vulnerability_index.R`). The two factor scores then combine the
 way `EXPOSURE` and `SENSITIVITY` combine into `VULNERABILITY`: a missing side
 is excluded from the sum rather than zero-filled (`na.rm = TRUE`), matching
 production's handling of domain-limited indicators like storm surge.
@@ -714,7 +714,7 @@ cat("Water supplies with a computable coastal component score:", nrow(coastal_fu
 
 ## Popup: per-site indicator contributions
 
-Mirrors the app's "Generate Report" factor bar chart (`rapid_app/app.R`,
+Mirrors the app's "Generate Report" factor bar chart (`app.R` in `nps_wsva_app`,
 `generate_report_btn` handler). One bar per normalized indicator feeding the
 combined score, colored by exposure (green) vs. sensitivity (purple), instead
 of a plain attribute table. Rendered with `leafpop::popupGraph()`, which

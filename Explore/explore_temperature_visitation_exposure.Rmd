@@ -22,7 +22,7 @@ suppressMessages(source("setup.R"))
 First, load in the water supply database. 
 We are only performing this rapid assessment on CONUS water supplies that are not municipal or hauled water supplies.
 ```{r}
-# parks <- getParkSystem()
+# parks <- get_park_system()
 # read in pre-saved park file
 suppressMessages(parks <- st_read("data/rapid/inputs/park_boundaries_2025-08-14.gpkg"))
 
@@ -339,7 +339,7 @@ gridmet_temp <- unique(water_supplies$wsd_source_id) %>%
   bind_rows() %>%
   filter(year(month) >= 1990 & year(month) <= 2014) %>%
   rename(temp_gridmet = tmean_C) %>%
-  mutate(month = as.character(make_ym(month)))
+  mutate(month = as.character(npswava::make_ym(month)))
 
 # "Observed" loca temp
 loca_temp <- grep("jay", list.files("data/rapid/inputs/loca2_temperature_water_supplies", full.names = TRUE), invert = FALSE, value = TRUE) %>%
@@ -366,7 +366,7 @@ loca_center <- loca_temp[center_idx, on = .(wsd_source_id, lon_index, lat_index)
   select(month = date, 
          wsd_source_id,
          temp_loca = value) %>%
-  mutate(month = make_ym(month)) 
+  mutate(month = npswava::make_ym(month)) 
 
 temp_comp <- gridmet_temp %>%
   inner_join(loca_center, by = c("wsd_source_id", "month")) %>%
@@ -583,8 +583,8 @@ historical_temp <- unique(water_supplies$wsd_source_id) %>%
   select(UnitCode, ym, wsd_source_id, mean_temp)
 
 visitation <- unique(historical_temp$UnitCode) %>%
-  map_dfr(~getUnitVisitation(units = .x, startYear = 2010, endYear = 2024)) %>%
-  mutate(ym = make_ym(ym(paste0(Year, "-", Month)))) %>%
+  map_dfr(~get_unit_visitation(units = .x, startYear = 2010, endYear = 2024)) %>%
+  mutate(ym = npswava::make_ym(ym(paste0(Year, "-", Month)))) %>%
   group_by(UnitCode, ym, Year, Month) %>%
   summarize(RecreationVisitors = sum(RecreationVisitors, na.rm = TRUE))
 
@@ -900,12 +900,12 @@ ggplot(dif_models) +
 # 
 # # visitation data:
 # all_dat <- function(park_unit){
-#   park_visitation <- getUnitVisitation(units = park_unit, startYear = 1900, endYear = 2025)
+#   park_visitation <- get_unit_visitation(units = park_unit, startYear = 1900, endYear = 2025)
 # }
 # 
 # s = Sys.time()
 # 
-# visitation <- getParkSystem() %>%
+# visitation <- get_park_system() %>%
 #   distinct(park_unit) %>%
 #   pull(park_unit) %>%
 #   map(possibly(~ all_dat(.x), otherwise = NULL)) %>%
@@ -1090,7 +1090,7 @@ fut_temp_indicators <- targets_2050 %>%
 
 ```{r old way, eval = FALSE}
 # historical:
-units <- getParkSystem() %>% 
+units <- get_park_system() %>% 
   filter(!STATE %in% c("AK", "HI", "PR", "AS", "GU", "MP", "VI")) %>% 
   filter(park_unit != "DRTO") %>% 
   group_by(park_unit) %>% 
@@ -1142,10 +1142,10 @@ temperature <- bind_rows(historical_data, future_data)
 
 # visitation data:
 all_dat <- function(park_unit){
-  park_visitation <- getUnitVisitation(units = park_unit, startYear = 1900, endYear = 2025)
+  park_visitation <- get_unit_visitation(units = park_unit, startYear = 1900, endYear = 2025)
 }
 s = Sys.time()
-visitation <- getParkSystem() %>%
+visitation <- get_park_system() %>%
   distinct(park_unit) %>%
   pull(park_unit) %>%
   map(possibly(~ all_dat(.x), otherwise = NULL)) %>%

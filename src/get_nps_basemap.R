@@ -7,7 +7,7 @@
 #' rotates the token, update `nps_token` from
 #' https://www.nps.gov/lib/npmap.js/4.2.1/npmap.min.js (search "atlas-user").
 #'
-#' @param aoi sf object to cover, e.g. from `getParkBoundary()`.
+#' @param aoi sf object to cover, e.g. from `get_park_boundary()`.
 #' @param style `"standard"`, `"light"` or `"slate"`.
 #' @param buffer_km Margin around `aoi`, in km.
 #' @param zoom Tile zoom level, or `NULL` to let maptiles choose.

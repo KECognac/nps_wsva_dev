@@ -71,7 +71,7 @@ mapviewOptions(fgb = FALSE)
 # Load data
 
 ```{r}
-parks <- getParkSystem()
+parks <- get_park_system()
 
 park_centroids <- parks %>%
   st_centroid() %>%

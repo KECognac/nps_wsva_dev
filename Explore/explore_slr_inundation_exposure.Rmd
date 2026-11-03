@@ -41,7 +41,7 @@ mapviewOptions(fgb = FALSE)
 
 # Load the datasets
 
-You can see how these data sets were generated or loaded in `src/rapid/process_inundation_data.R`
+You can see how these data sets were generated or loaded in `src/process_inundation_data.R`
 
 ## Read in buffered water supplies
 
@@ -96,7 +96,7 @@ ws_inun_proj_reg <- sf::st_read(here("data", "rapid", "inputs", "coast_comp",
 
 ## Read in the SLR inundation exposure risk calculations
 
-You could find how these data were generated in `src/rapid/calc_inundation_exposure.R`.
+You could find how these data were generated in `src/calc_inundation_exposure.R`.
 `calc_inundation_exposure()` function is called in `rapid_workflow.Rmd`.
 
 The "official" results are in `official_slr_inun_exp`.

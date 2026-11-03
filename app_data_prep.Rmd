@@ -22,7 +22,7 @@ options(tigris_use_cache = TRUE)
 # Overview
 
 This file is the single place where **all** datasets consumed by the rapid app
-are prepped and written. Every object written here lands in `rapid_app/app_data/`.
+are prepped and written. Every object written here lands in the app repo, `../nps_wsva_app/app_data/`.
 
 | Output | Contents |
 |-------------------------|-----------------------------------------------|
@@ -45,7 +45,7 @@ following the Euclidean distance framework of
 ```{r paths-helpers}
 # All paths are relative to project root (set in the setup chunk)
 dir_out <- "data/rapid/outputs"   # date-stamped indicator outputs
-dir_app <- "rapid_app/app_data"   # what the app reads
+dir_app <- "../nps_wsva_app/app_data"   # what the app reads (a clone of nps_wsva_app next to this repo)
 dir_int <- "data/rapid"           # intermediate / archive products
 
 dir.create(dir_app, recursive = TRUE, showWarnings = FALSE)
@@ -85,7 +85,7 @@ To add a new indicator:
 1.  Add a row below with the app-facing name, the raw column name in the output
     file, and the file stem.
 2.  Knit. The validation chunk reports anything that did not land.
-3.  Add a matching row to `rapid_app/app_data/indicator_details.csv` (label,
+3.  Add a matching row to `app_data/indicator_details.csv` in `nps_wsva_app` (label,
     description, direction, status) and to `indicator_config` in `app.R`.
 
 Conventions:
