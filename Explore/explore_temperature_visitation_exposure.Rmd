@@ -1,0 +1,1507 @@
+---
+title: "explore_temperature_visitation_exposure"
+author: "Katie Willi"
+date: "2026-01-30"
+output: html_document
+---
+```{r}
+
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Parks with timed entry:
+*SHEN; YOSE; ZION; ACAD; ARCH; GLAC; HALE; ROMO;*
+
+```{r, eval = TRUE}
+suppressMessages(source("setup.R"))
+```
+
+First, load in the water supply database. 
+We are only performing this rapid assessment on CONUS water supplies that are not municipal or hauled water supplies.
+```{r}
+# parks <- getParkSystem()
+# read in pre-saved park file
+suppressMessages(parks <- st_read("data/rapid/inputs/park_boundaries_2025-08-14.gpkg"))
+
+park_water_supplies <- parks %>% 
+  st_centroid() %>% 
+  st_transform(4326) %>% 
+  dplyr::mutate(y = st_coordinates(.)[,2], x = st_coordinates(.)[,1])
+
+# Read in water supply database for filtered parks
+
+
+table_path <- "data/Water_Supply_Systems/NPS_Water_Systems_Database_Joined.xlsx"
+
+
+water_supplies <- read_excel(table_path,
+                             sheet = 1,
+                             na = c("NA", "U"),
+                             skip = 1) %>%
+  dplyr::mutate(
+    source_longitude = as.numeric(source_longitude),
+    source_latitude = as.numeric(source_latitude)
+  ) %>%
+  filter(!state %in% c("AK", "AS", "HI", "MP", "PR", "VI")) %>%
+  left_join(
+    park_water_supplies %>% 
+      st_drop_geometry() %>% 
+      dplyr::select(UNIT_CODE, x, y),
+    by = c(park_unit = "UNIT_CODE")
+  ) %>% dplyr::mutate(
+    coords_flag = ifelse(
+      is.na(source_longitude) |
+        is.na(source_latitude),
+      "Centroid",
+      "Source Coordinates"
+    ),
+    source_longitude = ifelse(is.na(source_longitude), x, source_longitude),
+    source_latitude = ifelse(is.na(source_latitude), y, source_latitude)
+  ) %>%
+  # remove municipal and hauled source types, accounting for database entry errors
+  filter(!str_detect(source_type, regex("municipal|hauled", ignore_case = TRUE))) %>%
+  drop_na(source_longitude, source_latitude) %>%
+  st_as_sf(coords = (c("source_longitude", "source_latitude")),
+           crs = 4326,
+           remove = FALSE)
+```
+
+## Fisichelli et al. 2015 approach:
+Grab all park visitation and temperature data, combine into one file.
+We defined annual visitation levels as: low (10–399k visitors), medium (400–999 k visitors) and high (over 1 million visitors) as done in the NPS visitation study (Rappaport Keener et al., 2025)
+
+##### Download temperature data
+
+Download data from Pierce. Is split my tmin and tmax, and 30ish year time periods, so it's a lot of files. I've stored a list of all model/time/ssp combos to iterate over for the download.
+
+Also download GridMET data (for later comparison).
+
+Do once. takes forever.
+
+```{r, eval = FALSE}
+# LOCA hindcast, historical, monthly
+options(timeout = 1800)
+urls <- readLines("data/dissertation/loca2_complete_tasmax_tasmin_urls.txt")
+for(i in 1:length(urls)){
+  download.file(urls[i], destfile = paste0("data/all/loca2_mwbm/", basename(urls[i])))
+}
+
+# GRIDMET
+# Get unique sources with their geometries
+unique_sources <- water_supplies %>%
+  distinct(wsd_source_id, .keep_all = TRUE) %>%
+  select(wsd_source_id, geometry)
+
+# Create a 3x3 grid pattern
+grid_positions <- tibble(
+  direction = c("NW", "N", "NE", 
+                "W", "Center", "E", 
+                "SW", "S", "SE"),
+  x_offset = c(-1, 0, 1, -1, 0, 1, -1, 0, 1),
+  y_offset = c(1, 1, 1, 0, 0, 0, -1, -1, -1)
+)
+
+# Distance in meters (4 km)
+distance_m <- 4000
+
+# Transform to a projected CRS for accurate distance calculations
+unique_sources_proj <- unique_sources %>%
+  st_transform(crs = 5070)
+
+# Create new points for each grid position
+new_points <- grid_positions %>%
+  filter(direction != "Center") %>%  # Exclude center since that's the original point
+  crossing(unique_sources_proj) %>%
+  rowwise() %>%
+  mutate(
+    # Calculate new point using x and y offsets
+    new_geometry = st_sfc(
+      st_point(
+        c(
+          st_coordinates(geometry)[1] + (x_offset * distance_m),
+          st_coordinates(geometry)[2] + (y_offset * distance_m)
+        )
+      ),
+      crs = 5070
+    )
+  ) %>%
+  ungroup() %>%
+  # Drop the old geometry column and set the new one
+  st_drop_geometry() %>%
+  st_as_sf(sf_column_name = "new_geometry", crs = 5070) %>%
+  # Transform back to WGS84
+  st_transform(crs = 4326) %>%
+  # Create new IDs
+  mutate(
+    wsd_source_id_new = paste0(wsd_source_id, "_", direction),
+    point_type = "buffer_point"
+  ) %>%
+  select(wsd_source_id_original = wsd_source_id, 
+         wsd_source_id = wsd_source_id_new,
+         direction,
+         x_offset,
+         y_offset,
+         point_type,
+         geometry = new_geometry)
+# Optionally combine with original points
+original_points <- unique_sources %>%
+  mutate(
+    wsd_source_id_original = wsd_source_id,
+    direction = "Center",
+    bearing = NA_real_,
+    point_type = "original"
+  ) %>%
+  select(wsd_source_id_original, wsd_source_id, direction, bearing, point_type, geometry)
+
+all_points <- bind_rows(original_points, new_points)
+
+# gridMET download with {climateR}
+for(i in 1:nrow(all_points)){
+  
+  unit <- all_points[i,]
+  temp_data <- tibble()
+  try(temp_data <- climateR::getGridMET(AOI = unit,
+                                        varname = c("tmmx", "tmmn"),
+                                        startDate = "1980-01-01",
+                                        endDate = "2025-12-31") %>%
+        mutate(month = lubridate::ym(substr(date, 1, 7))) %>%
+        group_by(month) %>%
+        summarize(tmean_C = ((mean(tmmn, na.rm = TRUE) + mean(tmmx, na.rm = TRUE))/2) - 273.15) %>%
+        mutate(wsd_source_id = unit$wsd_source_id))
+  
+  arrow::write_parquet(temp_data, paste0("data/dissertation/gridmet_temperature_water_supplies/", unit$wsd_source_id, ".parquet"))
+  
+  Sys.sleep(1)
+  
+  print(unit$wsd_source_id)
+  
+}
+```
+
+Now that all have been downloaded, subset to only the models that were used in the MWBM? 
+This is still a work in progress - not sure if it's working properly yet. But, ideally want to double check all models have been downloaded.
+
+```{r, eval = TRUE}
+# Parse model + scenario (ssp### or historical) + run from LOCA2 filenames
+parse_gcm_bits <- function(x) {
+  bn <- basename(x)
+  
+  m <- str_match(bn, "(?i)(?:^|[._-])([A-Za-z0-9-]+)[._-](historical|ssp\\d{3})[._-](r\\d+i\\d+p\\d+f\\d+)(?:[._-]|$)")
+  
+  tibble(file = x,
+         model = m[, 2],
+         scenario = tolower(m[, 3]),  # "ssp370" or "historical"
+         run  = m[, 4]) %>%
+    filter(!if_any(c(model, scenario, run), is.na)) %>%
+    mutate(key_mr = str_c(model, run, sep = "|")) # match on model+run only
+}
+
+dir_in <- "data/all/loca2_mwbm/"
+
+# files
+runoff_files <- list.files(dir_in, pattern = "^runoff_MWBM_LOCA2", full.names = TRUE)
+tasmin_files <- list.files(dir_in, pattern = "^tasmin\\.", full.names = TRUE)
+tasmax_files <- list.files(dir_in, pattern = "^tasmax\\.", full.names = TRUE)
+
+# runoff model + run combos (ignore scenario so we can also pull historical temps)
+runoff_mr <- parse_gcm_bits(runoff_files) %>%
+  distinct(key_mr, model, run)
+
+# Keep tasmin/tasmax for:
+#   - any (model, run) that exists in runoff
+#   - AND for those, include BOTH historical + any ssp### that happen to be present
+tasmin_match <- parse_gcm_bits(tasmin_files) %>%
+  semi_join(runoff_mr %>% distinct(key_mr), by = "key_mr")
+
+tasmax_match <- parse_gcm_bits(tasmax_files) %>%
+  semi_join(runoff_mr %>% distinct(key_mr), by = "key_mr")
+
+tasmin_keep <- tasmin_match$file
+tasmax_keep <- tasmax_match$file
+
+# tas files whose (model, run) aren't in runoff (extras)
+tasmin_no_runoff_match <- parse_gcm_bits(tasmin_files) %>%
+  anti_join(runoff_mr %>% distinct(key_mr), by = "key_mr") %>%
+  pull(file)
+
+tasmax_no_runoff_match <- parse_gcm_bits(tasmax_files) %>%
+  anti_join(runoff_mr %>% distinct(key_mr), by = "key_mr") %>%
+  pull(file)
+
+# missing checks vs runoff (by scenario)
+# "Do we have historical tasmin/tasmax for every runoff model+run?"
+missing_hist_tasmin <- runoff_mr %>%
+  anti_join(tasmin_match %>% filter(scenario == "historical") %>% distinct(key_mr),
+            by = "key_mr") %>%
+  arrange(model, run)
+
+missing_hist_tasmax <- runoff_mr %>%
+  anti_join(tasmax_match %>% filter(scenario == "historical") %>% distinct(key_mr),
+            by = "key_mr") %>%
+  arrange(model, run)
+
+# "Do we have at least one ssp### tasmin/tasmax for every runoff model+run?"
+missing_ssp_tasmin <- runoff_mr %>%
+  anti_join(tasmin_match %>% filter(str_detect(scenario, "^ssp\\d{3}$")) %>% distinct(key_mr),
+            by = "key_mr") %>%
+  arrange(model, run)
+
+missing_ssp_tasmax <- runoff_mr %>%
+  anti_join(tasmax_match %>% filter(str_detect(scenario, "^ssp\\d{3}$")) %>% distinct(key_mr),
+            by = "key_mr") %>%
+  arrange(model, run)
+
+# Optional: paired table (one row per model+run+scenario) with file paths
+pairs <- full_join(tasmin_match %>% transmute(key_mr, model, run, scenario, tasmin_file = file),
+                   tasmax_match %>% transmute(key_mr, model, run, scenario, tasmax_file = file),
+                   by = c("key_mr","model","run","scenario")) %>%
+  arrange(model, run, scenario)
+```
+
+##### Process temperature data
+
+Grab the raw tmin and tmax model files and get the mean temp across each site's grid and its surrounding grids.
+
+Do once. takes forever.
+
+```{r, eval = FALSE}
+# "observed" loca2 temp data (already averaged)
+process_loca2_mwbm(nc_path = "data/all/loca2_mwbm/jay_alder_tas_MWBM_LOCA2_training_195001-201412.nc",
+                   output_dir = "data/rapid/inputs/loca2_temperature_water_supplies/", 
+                   water_supplies = water_supplies %>% select(wsd_source_id), 
+                   var = "tas",
+                   historical = c("1990-01-01", "2024-12-31"),
+                   future = c("2025-01-01", "2100-12-31"))
+
+# modeled loca2 data (tmin)
+walk(list.files("data/all/loca2/", pattern = "tasmin.", full.names = TRUE),
+     ~try(process_loca2_mwbm(.x, 
+                             output_dir = "data/rapid/inputs/loca2_temperature_water_supplies/", 
+                             water_supplies = water_supplies %>% select(wsd_source_id), 
+                             var = "tasmin_tavg",
+                             historical = c("1990-01-01", "2024-12-31"),
+                             future = c("2025-01-01", "2100-12-31"))))
+# modeled loca2 data (tmax)
+walk(list.files("data/all/loca2/", pattern = "tasmax.", full.names = TRUE),
+     ~process_loca2_mwbm(.x, 
+                         output_dir = "data/rapid/inputs/loca2_temperature_water_supplies/", 
+                         water_supplies = water_supplies %>% select(wsd_source_id), 
+                         var = "tasmax_tavg",
+                         historical = c("1990-01-01", "2024-12-31"),
+                         future = c("2025-01-01", "2100-12-31")))
+
+# all files processed minus "observed" loca2 (denoted with "Jay"):
+model_files <- grep("jay",
+                    list.files("data/rapid/inputs/loca2_temperature_water_supplies", full.names = TRUE),
+                    invert = TRUE,
+                    value = TRUE)
+
+# {data.table} approach at binding and averaging across tmax and tmin data sets to get average monthly temp per site:
+out <- rbindlist(
+  lapply(model_files, function(f) {
+    dt <- as.data.table(arrow::read_parquet(f))
+    dt <- dt[, model := sub("^[^.]+\\.([^.]+\\.[^.]+\\.[^.]+)\\..*$", "\\1", basename(f))]
+    
+    # Aggregate immediately within this file
+    dt <- dt[, .(
+      mean  = mean(value, na.rm = TRUE),
+      count = .N
+    ),
+    by = .(wsd_source_id, date, model)
+    ]
+  }),
+  use.names = TRUE,
+  fill = TRUE
+)
+
+arrow::write_parquet(out, "data/dissertation/loca2_temp_nps_water_supplies.parquet")
+```
+
+#### How different are GridMET and LOCA?
+```{r}
+# "Observed" gridmet temp
+gridmet_temp <- unique(water_supplies$wsd_source_id) %>%
+  map(~try({
+    
+    list.files("data/dissertation/gridmet_temperature_water_supplies/", pattern = paste(.x), full.names = TRUE) %>%
+      map_dfr(~read_parquet(.x)) %>%
+      group_by(month) %>%
+      summarize(tmean_C = mean(tmean_C, na.rm = TRUE),
+                n_points = n()) %>%
+      mutate(wsd_source_id = .x)
+    
+    
+  })) %>%
+  keep(tibble::is_tibble) %>%
+  bind_rows() %>%
+  filter(year(month) >= 1990 & year(month) <= 2014) %>%
+  rename(temp_gridmet = tmean_C) %>%
+  mutate(month = as.character(make_ym(month)))
+
+# "Observed" loca temp
+loca_temp <- grep("jay", list.files("data/rapid/inputs/loca2_temperature_water_supplies", full.names = TRUE), invert = FALSE, value = TRUE) %>%
+  map_dfr(~arrow::read_parquet(.x) %>% as.data.table()) %>%
+  filter(year(date) >= 1990 & year(date) <= 2014)
+
+setDT(loca_temp)
+
+# 1) Find the most common lon/lat index pair per wsd_source_id (the center cell)
+center_idx <- loca_temp[
+  ,
+  .N,
+  by = .(wsd_source_id, lon_index, lat_index)
+][
+  order(wsd_source_id, -N)
+][
+  , .SD[1], by = wsd_source_id   # take top-count pair
+][
+  , .(wsd_source_id, lon_index, lat_index)
+]
+
+# 2) Semi-join to keep only those rows (center cell), preserving all dates/times
+loca_center <- loca_temp[center_idx, on = .(wsd_source_id, lon_index, lat_index)] %>%
+  select(month = date, 
+         wsd_source_id,
+         temp_loca = value) %>%
+  mutate(month = make_ym(month)) 
+
+temp_comp <- gridmet_temp %>%
+  inner_join(loca_center, by = c("wsd_source_id", "month")) %>%
+  tidyr::drop_na()
+
+dt <- as.data.table(temp_comp)
+
+dt[
+  ,
+  .(
+    n     = .N,
+    cor   = cor(temp_loca, temp_gridmet, use = "complete.obs"),
+    bias  = mean(temp_loca - temp_gridmet, na.rm = TRUE),
+    rmse  = sqrt(mean((temp_loca - temp_gridmet)^2, na.rm = TRUE))
+  )
+]
+
+
+bad_dif <- dt[
+  ,
+  .(
+    n    = .N,
+    cor  = cor(temp_loca, temp_gridmet, use = "complete.obs"),
+    rmse = sqrt(mean((temp_loca - temp_gridmet)^2, na.rm = TRUE)),
+    bias = mean(temp_loca - temp_gridmet, na.rm = TRUE)
+  ),
+  by = wsd_source_id
+][order(-rmse)]
+
+
+
+viewer <- temp_comp %>%
+  left_join(water_supplies %>% select(wsd_source_id, region, geometry), by = "wsd_source_id")
+
+
+viewer %>%
+  mutate(mean_temp = (temp_loca + temp_gridmet) / 2,
+         diff = temp_loca - temp_gridmet) %>%
+  ggplot(aes(mean_temp, diff, color = region)) +
+  geom_point(alpha = 0.3) +
+  geom_hline(yintercept = 0, linetype = 2) +
+  labs(x = "Mean of LOCA and gridMET (°C)",
+       y = "LOCA − gridMET (°C)")
+
+lims <- range(
+  c(viewer$temp_loca, viewer$temp_gridmet),
+  na.rm = TRUE
+)
+
+n_by_region <- viewer %>%
+  filter(!is.na(temp_loca), !is.na(temp_gridmet)) %>%
+  count(region)
+
+ggplot(viewer) + 
+  geom_point(aes(x = temp_loca, y = temp_gridmet, color = region)) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+  facet_wrap(~ region, scales = "fixed") +
+  scale_x_continuous(limits = lims) +
+  scale_y_continuous(limits = lims) +
+  coord_equal() +
+  geom_text(data = n_by_region,
+            aes(label = paste0("n = ", n)),
+            x = -Inf, y = Inf,
+            hjust = -0.1, vjust = 1.1,
+            inherit.aes = FALSE)
+
+
+# Statistical test of "interchangeability": TOST equivalence  (Overall and by region) on paired differences
+
+# overall paired difference package
+library(TOSTER)
+
+eq_bounds <- 0.5  # °C (pick your practical bound)
+
+diff_all <- with(viewer, temp_loca - temp_gridmet)
+diff_all <- diff_all[!is.na(diff_all)]
+
+tost_all <- tsum_TOST(m1 = mean(diff_all),
+                      sd1 = sd(diff_all),
+                      n1 = length(diff_all),
+                      mu = 0,                   
+                      low_eqbound = -eq_bounds,
+                      high_eqbound =  eq_bounds,
+                      eqbound_type = "raw",
+                      alpha = 0.05)
+tost_all
+```
+
+It is a one-sample TOST equivalence test (TOST = Two One-Sided Tests), which tests whether the mean difference between LOCA and gridMET temperatures falls within a pre-defined practical equivalence range (±0.5 °C), meaning the two datasets can be considered practically equivalent rather than exactly the same. Using a ±0.5 °C tolerance, the average temperature difference between LOCA and gridMET is small enough that the two datasets can be treated as effectively the same for this analysis. (That said, LOCA temperatures are consistently about 0.32 °C cooler than gridMET on average so we could bias-correct?)
+
+Regional test:
+```{r}
+tost_by_region <- viewer %>%
+  filter(!is.na(temp_loca), !is.na(temp_gridmet)) %>%
+  mutate(diff = temp_loca - temp_gridmet) %>%
+  group_by(region) %>%
+  summarise(
+    n = sum(!is.na(diff)),
+    mean_diff = mean(diff, na.rm = TRUE),
+    sd_diff   = sd(diff, na.rm = TRUE),
+    tost = list(
+      tsum_TOST(
+        m1 = mean_diff,
+        sd1 = sd_diff,
+        n1 = n,
+        mu = 0,
+        low_eqbound  = -eq_bounds,
+        high_eqbound =  eq_bounds,
+        eqbound_type = "raw",
+        alpha = 0.05
+      )
+    ),
+    .groups = "drop"
+  )
+
+
+eq_bounds <- 0.5
+alpha <- 0.05
+
+tost_by_region_summary <- tost_by_region %>%
+  mutate(
+    se = sd_diff / sqrt(n),
+    df = n - 1,
+    
+    # NHST: mean diff == 0 (two-sided)
+    t_nhst = mean_diff / se,
+    nhst_p = 2 * pt(-abs(t_nhst), df = df),
+    
+    # TOST: H0: mean <= -b  OR mean >= +b
+    t_lower = (mean_diff - (-eq_bounds)) / se,   # test mean > -b
+    t_upper = (mean_diff - ( eq_bounds)) / se,   # test mean < +b
+    
+    tost_p_lower = 1 - pt(t_lower, df = df),
+    tost_p_upper = pt(t_upper, df = df),
+    
+    equivalent = (tost_p_lower < alpha) & (tost_p_upper < alpha)
+  ) %>%
+  select(region, n, mean_diff, sd_diff, nhst_p, tost_p_lower, tost_p_upper, equivalent)
+
+```
+
+"Bias-correction"? We could create a bias-corrected gridMET to match LOCA by adding the region-specific mean difference (LOCA − gridMET) to gridMET; after correction, the mean LOCA–gridMET difference within each region was effectively zero (around 10e-15 Celsius per region), confirming the offset was removed while preserving variability.
+```{r}
+region_offsets <- viewer %>%
+  filter(!is.na(temp_loca), !is.na(temp_gridmet)) %>%
+  mutate(diff = temp_loca - temp_gridmet) %>%
+  group_by(region) %>%
+  summarize(n = n(),
+            mean_diff = mean(diff, na.rm = TRUE),
+            sd_diff   = sd(diff, na.rm = TRUE),
+            .groups = "drop")
+
+
+viewer_repl <- viewer %>%
+  left_join(region_offsets %>% select(region, mean_diff), by = "region") %>%
+  mutate(temp_gridmet_loca_eq = temp_gridmet + mean_diff)
+
+viewer_repl %>%
+  filter(!is.na(temp_loca), !is.na(temp_gridmet_loca_eq)) %>%
+  mutate(diff_after = temp_loca - temp_gridmet_loca_eq) %>%
+  group_by(region) %>%
+  summarize(mean_after = mean(diff_after),
+            sd_after   = sd(diff_after),
+            .groups = "drop")
+
+viewer_repl %>%
+  mutate(mean_temp = (temp_loca + temp_gridmet_loca_eq) / 2,
+         diff = temp_loca - temp_gridmet_loca_eq) %>%
+  ggplot(aes(mean_temp, diff, color = region)) +
+  geom_point(alpha = 0.3) +
+  geom_hline(yintercept = 0, linetype = 2) +
+  labs(x = "Mean of LOCA and LOCA-fixed gridMET (°C)",
+       y = "LOCA − LOCA-fixed gridMET (°C)") +
+  facet_wrap(~region)
+
+
+ggplot(viewer_repl) + 
+  geom_point(aes(x = temp_loca, y = temp_gridmet_loca_eq, color = region)) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+  facet_wrap(~ region, scales = "fixed") +
+  scale_x_continuous(limits = lims) +
+  scale_y_continuous(limits = lims) +
+  coord_equal() +
+  geom_text(data = n_by_region,
+            aes(label = paste0("n = ", n)),
+            x = -Inf, y = Inf,
+            hjust = -0.1, vjust = 1.1,
+            inherit.aes = FALSE)
+
+```
+
+##### Relate temperature to visitation
+
+```{r}
+historical_temp <- unique(water_supplies$wsd_source_id) %>%
+  map(~try({
+    
+    list.files("data/dissertation/gridmet_temperature_water_supplies/", pattern = paste(.x), full.names = TRUE) %>%
+      map_dfr(~read_parquet(.x)) %>%
+      group_by(month) %>%
+      summarize(tmean_C = mean(tmean_C, na.rm = TRUE),
+                n_points = n()) %>%
+      mutate(wsd_source_id = .x) 
+    
+  })) %>%
+  keep(tibble::is_tibble) %>%
+  bind_rows() %>%
+  left_join(water_supplies %>% select(wsd_source_id, region, geometry), by = "wsd_source_id") %>%
+  left_join(region_offsets %>% select(region, mean_diff), by = "region")  %>%
+  mutate(mean_temp = tmean_C + mean_diff) %>%
+  mutate(UnitCode = str_sub(wsd_source_id, 1, 4),
+         ym = as.character(month),
+         month = ym(month)) %>%
+  select(UnitCode, ym, wsd_source_id, mean_temp)
+
+visitation <- unique(historical_temp$UnitCode) %>%
+  map_dfr(~getUnitVisitation(units = .x, startYear = 2010, endYear = 2024)) %>%
+  mutate(ym = make_ym(ym(paste0(Year, "-", Month)))) %>%
+  group_by(UnitCode, ym, Year, Month) %>%
+  summarize(RecreationVisitors = sum(RecreationVisitors, na.rm = TRUE))
+
+# peak historical monthly average visitation per park, for caps
+historic_average_cap <- visitation %>%
+  group_by(UnitCode, Month) %>%
+  summarize(avg_visit = mean(RecreationVisitors, na.rm = TRUE), 
+            .groups = "drop_last") %>%
+  filter(avg_visit == max(avg_visit)) %>%
+  ungroup() %>%
+  mutate(visit_cap_upper = avg_visit * 1.25,  # High = looser ceiling (+25%)
+         visit_cap_lower = avg_visit * 1.05) %>%   # Low  = tighter ceiling (+5%)
+  select(UnitCode, visit_cap_upper, visit_cap_lower)
+
+# fit NULL model, linear, quadratic, and cubic models for each park. select best by BIC
+fit_and_select <- function(df
+) {
+  long_enough <- nrow(df) >= 4*12 &&
+    sum(!is.na(df$RecreationVisitors)) >= 4*12 &&
+    sum(!is.na(df$mean_temp)) >= 4*12
+  if (!long_enough) {
+    return(tibble(model_name = "null",
+                  bic = NA_real_,
+                  adj_r2 = NA_real_,
+                  model = list(lm(RecreationVisitors ~ 1, data = df))))
+  }
+  
+  models <- list(null = lm(RecreationVisitors ~ 1, data = df),
+                 linear = lm(RecreationVisitors ~ mean_temp, data = df),
+                 quadratic = lm(RecreationVisitors ~ poly(mean_temp, 2, raw = TRUE), data = df),
+                 cubic = lm(RecreationVisitors ~ poly(mean_temp, 3, raw = TRUE), data = df))
+  
+  stats <- tibble(model_name = names(models),
+                  model = unname(models),
+                  bic = map_dbl(models, BIC),
+                  # for r2, record NA_real_ if nothing is returned.
+                  # otherwise, convert the adjusted r2 to a plain numeric value.
+                  adj_r2 = map_dbl(models, function(m){
+                    val <- suppressWarnings(broom::glance(m)$adj.r.squared)
+                    if (length(val) == 0 || is.na(val)) NA_real_ else as.numeric(val)
+                  })
+  ) %>%
+    slice_min(bic, n = 1, with_ties = FALSE)
+  return(stats)
+}
+
+park_models <- historical_temp %>%
+  inner_join(., visitation, by = c("UnitCode", "ym")) %>%
+  group_by(wsd_source_id) %>%
+  group_modify(~ fit_and_select(.x)) %>%
+  ungroup() %>%
+  mutate(temp_in_model = model_name != "null",
+         temp_sensitive = temp_in_model & !is.na(adj_r2) & adj_r2 >= 0.5)
+
+# predict for all parks:
+predict_one_park <- function(mod, newdf) {
+  if (nrow(newdf) == 0) return(newdf %>% mutate(.pred = numeric(0)))
+  newdf %>% mutate(.pred = as.numeric(predict(mod, newdata = newdf)))
+}
+
+# hindcast data
+historic_hindcasts <- historical_temp %>%
+  inner_join(., visitation, by = c("UnitCode", "ym")) %>%
+  select(wsd_source_id, ym, RecreationVisitors, mean_temp) %>%
+  filter(!is.na(wsd_source_id), !is.na(ym), !is.na(mean_temp)) %>%
+  nest(data = c(ym, mean_temp, RecreationVisitors)) %>%
+  left_join(park_models %>% 
+              select(wsd_source_id, model_name, bic, adj_r2, model, temp_sensitive),
+            by = "wsd_source_id") %>%
+  mutate(pred = map2(model, data, predict_one_park)) %>%
+  select(wsd_source_id, model_name, bic, adj_r2, temp_sensitive, pred) %>%
+  unnest(pred) %>%
+  transmute(wsd_source_id, ym, # year, month,
+            model_name, bic, adj_r2, temp_sensitive,
+            Pred_High = .pred,   
+            Pred_Low = .pred)
+
+# KW START HERE:::
+# # future predictions data
+# future_predictions <- future_data %>%
+#   filter(!is.na(park_unit), !is.na(month), !is.na(tmean_C)) %>%
+#   nest(data = c(ym, year, month, tmean_C)) %>%
+#   left_join(park_models %>% 
+#               select(park_unit, model_name, bic, adj_r2, model, temp_sensitive),
+#             by = "park_unit") %>%
+#   filter(!is.na(bic)) %>%  # keep parks with a selected model
+#   mutate(pred = map2(model, data, predict_one_park)) %>%
+#   select(park_unit, model_name, bic, adj_r2, temp_sensitive, pred) %>%
+#   unnest(pred) %>%
+#   left_join(historic_average_cap, by = "park_unit") %>%
+#   mutate(Pred_High = pmin(.pred, visit_cap_upper),  # looser ceiling (+25%)
+#          Pred_Low = pmin(.pred, visit_cap_lower)) %>%   # tighter ceiling (+5%)
+#   select(park_unit, ym, year, month, model_name, bic, adj_r2, temp_sensitive, Pred_High, Pred_Low)
+# 
+# # aggregate annual vals
+# annual_hindcast <- historic_hindcasts %>%
+#   group_by(park_unit, year) %>%
+#   summarize(Pred_High = sum(Pred_High, na.rm = TRUE),
+#             Pred_Low = sum(Pred_Low,  na.rm = TRUE),
+#             .groups = "drop") %>%
+#   mutate(period = "hindcast")
+# 
+# annual_future <- future_predictions %>%
+#   group_by(park_unit, year) %>%
+#   summarize(Pred_High = sum(Pred_High, na.rm = TRUE),
+#             Pred_Low = sum(Pred_Low,  na.rm = TRUE),
+#             .groups = "drop") %>%
+#   mutate(period = "future")
+# 
+# annual_observed <- historic_data %>%
+#   group_by(park_unit, year) %>%
+#   summarize(Observed = sum(RecreationVisitors, na.rm = TRUE), .groups = "drop")
+# 
+# annual_pred <- bind_rows(annual_hindcast, annual_future)
+# 
+# 
+# top_park <- "GRTE" # park_models %>% arrange(desc(adj_r2)) %>% slice(1) %>% pull(park_unit)
+# 
+# plot_df <- annual_pred %>%
+#   filter(park_unit == top_park) %>%
+#   select(park_unit, year, period, Pred_High, Pred_Low) %>%
+#   left_join(annual_observed %>% 
+#               filter(park_unit == top_park),
+#             by = c("park_unit","year"))
+# 
+# ggplot(plot_df, aes(x = year)) +
+#   geom_line(aes(y = Pred_High, linetype = period)) +
+#   geom_line(aes(y = Pred_Low,  linetype = period)) +
+#   geom_line(aes(y = Observed), color = "blue") +
+#   labs(title = paste0(top_park, ": Observed vs. Modeled Visitation"),
+#        y = "Annual visitation",
+#        linetype = "Prediction period") +
+#   theme_minimal(base_size = 12)
+# 
+# # making the exposure indicators
+# baseline_obs <- annual_observed %>%
+#   filter(year == 2025) %>%
+#   transmute(park_unit, Reference_Observed = Observed)
+# 
+# targets_2050 <- annual_future %>%
+#   filter(year == 2050) %>%
+#   rename(Future_Temperature_High = Pred_High,
+#          Future_Temperature_Low = Pred_Low) %>%
+#   select(park_unit, year, Future_Temperature_High, Future_Temperature_Low)
+# 
+# fut_temp_indicators <- targets_2050 %>%
+#   left_join(baseline_obs, by = "park_unit") %>%
+#   mutate(Year_Future = year,
+#          Year_Reference = 2025L,
+#          # percent change from 2050 vs observed 2025
+#          high_percent_change_raw_real = (Future_Temperature_High - Reference_Observed) / Reference_Observed,
+#          low_percent_change_raw_real  = (Future_Temperature_Low  - Reference_Observed) / Reference_Observed) %>%
+#   add_standardized_indicators(prefix = "percent_change")
+```
+
+
+
+##### Find extreme models per water supply
+```{r}
+combined_data <- read_parquet("data/dissertation/loca2_temp_nps_water_supplies.parquet") %>%
+  data.table::as.data.table() 
+combined_data[
+  ,
+  c("model", "ssp", "run") := tstrsplit(model, "\\.")
+]
+
+setnames(combined_data, "model", "model_full")
+
+combined_data[
+  , c("model", "ssp", "run") := tstrsplit(model_full, "\\.")
+]
+
+# distinct (model, scenario) pairs that exist in the past and future
+ssps <- combined_data %>%
+  filter(ssp != "historical") %>%
+  distinct(model, ssp, run)
+
+temperature_change_sub <- vector("list", length = nrow(ssps))
+
+for(i in 1:nrow(ssps)){
+  
+  ssp_sub <- ssps[i,]
+  
+  hindcast <- combined_data %>%
+    filter(model == ssp_sub$model,
+           ssp == "historical" | (ssp == ssp_sub$ssp & year(date) <= 2025),
+           run == ssp_sub$run) %>%
+    filter(year(date) <= 2025)
+  
+  future <- combined_data %>%
+    filter(model == ssp_sub$model,
+           ssp == ssp_sub$ssp,
+           run == ssp_sub$run) %>%
+    filter(year(date) >= 2035 & year(date) <= 2065)
+  
+  historical_stat <- hindcast %>%
+    group_by(wsd_source_id, park_unit) %>%
+    summarize(temperature_historical = mean(mean, na.rm = TRUE),
+              range_historical = paste0(min(year(date)), "-", end = max(year(date))))
+  
+  future_stat <- future %>% 
+    group_by(wsd_source_id, park_unit) %>%
+    summarize(temperature_future = mean(mean, na.rm = TRUE),
+              range_future = paste0(min(year(date)), "-", end = max(year(date))))
+  
+  temperature_change_sub[[i]] <- future_stat %>%
+    inner_join(., historical_stat, by = c("wsd_source_id", "park_unit")) %>%
+    mutate(model = ssp_sub$model,
+           ssp = ssp_sub$ssp,
+           run = ssp_sub$run,
+           temperature_change = temperature_future - temperature_historical,
+           percent_change = (temperature_change / temperature_historical) * 100)
+}
+
+temperature_change <- bind_rows(temperature_change_sub)
+
+
+# calculate percentile indicators:
+suppressMessages({suppressWarnings({
+  
+  p10_values <- temperature_change %>%
+    group_by(park_unit, wsd_source_id) %>%
+    mutate(p10 = quantile(percent_change, 0.10, na.rm = TRUE),
+           diff_from_p10 = abs(percent_change - p10)) %>%
+    filter(diff_from_p10 == min(diff_from_p10, na.rm = TRUE)) %>%
+    slice(1) %>%  # take first if ties
+    ungroup() %>%
+    mutate(model_p10 = paste(model, ssp, run, sep = ".")) %>%
+    select(wsd_source_id,
+           park_unit,
+           raw_temperature_change_p10 = percent_change,
+           model_p10)
+  
+  p50_values <- temperature_change %>%
+    group_by(park_unit, wsd_source_id) %>%
+    mutate(p50 = median(percent_change, na.rm = TRUE),
+           diff_from_p50 = abs(percent_change - p50)) %>%
+    filter(diff_from_p50 == min(diff_from_p50, na.rm = TRUE)) %>%
+    slice(1) %>%  # take first if ties
+    ungroup() %>%
+    mutate(model_p50 = paste(model, ssp, run, sep = ".")) %>%
+    select(wsd_source_id,
+           park_unit,
+           raw_temperature_change_p50 = percent_change,
+           model_p50)
+  
+  p90_values <- temperature_change %>%
+    group_by(park_unit, wsd_source_id) %>%
+    mutate(p90 = quantile(percent_change, 0.90, na.rm = TRUE),
+           diff_from_p90 = abs(percent_change - p90)) %>%
+    filter(diff_from_p90 == min(diff_from_p90, na.rm = TRUE)) %>%
+    slice(1) %>%  # take first if ties
+    ungroup() %>%
+    mutate(model_p90 = paste(model, ssp, run, sep = ".")) %>%
+    select(wsd_source_id,
+           park_unit,
+           raw_temperature_change_p90 = percent_change,
+           model_p90)
+  
+})})
+
+# Combine all indicators using standardized joins
+temp_model_list <- p10_values %>%
+  left_join(p50_values, by = c("wsd_source_id", "park_unit")) %>%
+  left_join(p90_values, by = c("wsd_source_id", "park_unit")) %>%
+  left_join(water_supplies %>% select(wsd_source_id, park_name), by = "wsd_source_id") %>%
+  # reorder columns following standardized pattern
+  select(wsd_source_id, park_unit, park_name, everything())
+```
+
+
+
+
+### Do models deviate within parks?
+
+```{r}
+dif_models <- final_results %>%
+  group_by(park_unit) %>%
+  summarize(n_water_supplies = n_distinct(wsd_source_id),
+            n_models_p90 = n_distinct(model_p90),
+            n_models_p50 = n_distinct(model_p90),
+            n_models_p10 = n_distinct(model_p90))
+
+ggplot(dif_models) +
+  geom_bar(aes(x = n_models_p90,
+               fill = factor(n_water_supplies))) +
+  labs(fill = "Number of Water Supplies",
+       x = "Distinct Models (P90)",
+       y = "Number of parks")
+```
+
+```{r new way, eval = FALSE}
+# # future: 
+# future_data <- vector("list", length = nrow(units))
+# 
+# for(i in 1:nrow(units)){
+#   
+#   try(future_data[[i]] <- fread(paste0("data/all/climate_selection/temp_clim/", units[i,] %>% .$park_unit, ".csv")) %>%
+#         filter(GCM == unique(.$GCM)[1])  %>%
+#         mutate(park_unit = units[i,] %>% .$park_unit, 
+#                mean = (`Tavg (F)` - 32) * 5/9,
+#                month = lubridate::ym(substr(Date, 1, 7))) %>%
+#         group_by(month, park_unit) %>%
+#         summarize(tmean_C = mean(mean, na.rm = TRUE)) %>%
+#         select(tmean_C, mean, park_unit))
+# }
+# 
+# future_data <- future_data %>%
+#   bind_rows()
+# 
+# 
+# temperature <- bind_rows(historical_data, future_data)
+# 
+# # visitation data:
+# all_dat <- function(park_unit){
+#   park_visitation <- getUnitVisitation(units = park_unit, startYear = 1900, endYear = 2025)
+# }
+# 
+# s = Sys.time()
+# 
+# visitation <- getParkSystem() %>%
+#   distinct(park_unit) %>%
+#   pull(park_unit) %>%
+#   map(possibly(~ all_dat(.x), otherwise = NULL)) %>%
+#   keep(~!is.null(.)) %>%
+#   bind_rows() %>%
+#   mutate(month = make_date(year = Year, month = Month, day = 1))
+# 
+# Sys.time() - s
+# 
+# 
+# # bind all together:
+# all_data <- temperature %>%
+#   inner_join(visitation, by = c("park_unit" = "UnitCode", "month"))
+
+# load Kristen's stored data
+load("~/Desktop/0_my_git/nps_water_vulnerability/data/all/Visitation_Projection/Explore_Visitation_Temperature.RData")
+
+#`all_dat` is object she stored with all necessary historical info
+# climate_future is the object stored with all necessary future info
+
+# ...remove all else:
+rm(list = setdiff(ls(), c("all_dat", "climate_future")))
+
+source("setup.R")
+
+historic_data <- all_dat %>% 
+  rename(month = Month, year = Year) %>%
+  select(ym, year, month, park_unit, RecreationVisitors, tmean_C)
+
+# peak historical monthly average visitation per park, for caps
+historic_average_cap <- historic_data %>%
+  group_by(park_unit, month) %>%
+  summarize(avg_visit = mean(RecreationVisitors, na.rm = TRUE), 
+            .groups = "drop_last") %>%
+  filter(avg_visit == max(avg_visit)) %>%
+  ungroup() %>%
+  mutate(visit_cap_upper = avg_visit * 1.25,  # High = looser ceiling (+25%)
+         visit_cap_lower = avg_visit * 1.05) %>%   # Low  = tighter ceiling (+5%)
+  select(park_unit, visit_cap_upper, visit_cap_lower)
+
+future_data <- climate_future %>%
+  mutate(year = year(ym), 
+         month = month(ym)) %>%
+  select(ym, year, month, park_unit, tmean_C)
+
+# fit NULL model, linear, quadratic, and cubic models for each park. select best by BIC
+fit_and_select <- function(df) {
+  long_enough <- nrow(df) >= 14*12 &&
+    sum(!is.na(df$RecreationVisitors)) >= 14*12 &&
+    sum(!is.na(df$tmean_C)) >= 14*12
+  if (!long_enough) {
+    return(tibble(model_name = "null",
+                  bic = NA_real_,
+                  adj_r2 = NA_real_,
+                  model = list(lm(RecreationVisitors ~ 1, data = df))))
+  }
+  
+  models <- list(null = lm(RecreationVisitors ~ 1, data = df),
+                 linear = lm(RecreationVisitors ~ tmean_C, data = df),
+                 quadratic = lm(RecreationVisitors ~ poly(tmean_C, 2, raw = TRUE), data = df),
+                 cubic = lm(RecreationVisitors ~ poly(tmean_C, 3, raw = TRUE), data = df))
+  
+  stats <- tibble(model_name = names(models),
+                  model = unname(models),
+                  bic = map_dbl(models, BIC),
+                  # for r2, record NA_real_ if nothing is returned.
+                  # otherwise, convert the adjusted r2 to a plain numeric value.
+                  adj_r2 = map_dbl(models, function(m){
+                    val <- suppressWarnings(broom::glance(m)$adj.r.squared)
+                    if (length(val) == 0 || is.na(val)) NA_real_ else as.numeric(val)
+                  })
+  ) %>%
+    slice_min(bic, n = 1, with_ties = FALSE)
+  return(stats)
+}
+
+park_models <- historic_data %>%
+  group_by(park_unit) %>%
+  group_modify(~ fit_and_select(.x)) %>%
+  ungroup() %>%
+  mutate(temp_in_model = model_name != "null",
+         temp_sensitive = temp_in_model & !is.na(adj_r2) & adj_r2 >= 0.5)
+
+# predict for all parks:
+predict_one_park <- function(mod, newdf) {
+  if (nrow(newdf) == 0) return(newdf %>% mutate(.pred = numeric(0)))
+  newdf %>% mutate(.pred = as.numeric(predict(mod, newdata = newdf)))
+}
+
+# hindcast data
+historic_hindcasts <- historic_data %>%
+  filter(!is.na(park_unit), !is.na(month), !is.na(tmean_C)) %>%
+  nest(data = c(ym, year, month, tmean_C)) %>%
+  left_join(park_models %>% 
+              select(park_unit, model_name, bic, adj_r2, model, temp_sensitive),
+            by = "park_unit") %>%
+  mutate(pred = map2(model, data, predict_one_park)) %>%
+  select(park_unit, model_name, bic, adj_r2, temp_sensitive, pred) %>%
+  unnest(pred) %>%
+  transmute(park_unit, ym, year, month,
+            model_name, bic, adj_r2, temp_sensitive,
+            Pred_High = .pred,   
+            Pred_Low = .pred)
+
+# future predictions data
+future_predictions <- future_data %>%
+  filter(!is.na(park_unit), !is.na(month), !is.na(tmean_C)) %>%
+  nest(data = c(ym, year, month, tmean_C)) %>%
+  left_join(park_models %>% 
+              select(park_unit, model_name, bic, adj_r2, model, temp_sensitive),
+            by = "park_unit") %>%
+  filter(!is.na(bic)) %>%  # keep parks with a selected model
+  mutate(pred = map2(model, data, predict_one_park)) %>%
+  select(park_unit, model_name, bic, adj_r2, temp_sensitive, pred) %>%
+  unnest(pred) %>%
+  left_join(historic_average_cap, by = "park_unit") %>%
+  mutate(Pred_High = pmin(.pred, visit_cap_upper),  # looser ceiling (+25%)
+         Pred_Low = pmin(.pred, visit_cap_lower)) %>%   # tighter ceiling (+5%)
+  select(park_unit, ym, year, month, model_name, bic, adj_r2, temp_sensitive, Pred_High, Pred_Low)
+
+# aggregate annual vals
+annual_hindcast <- historic_hindcasts %>%
+  group_by(park_unit, year) %>%
+  summarize(Pred_High = sum(Pred_High, na.rm = TRUE),
+            Pred_Low = sum(Pred_Low,  na.rm = TRUE),
+            .groups = "drop") %>%
+  mutate(period = "hindcast")
+
+annual_future <- future_predictions %>%
+  group_by(park_unit, year) %>%
+  summarize(Pred_High = sum(Pred_High, na.rm = TRUE),
+            Pred_Low = sum(Pred_Low,  na.rm = TRUE),
+            .groups = "drop") %>%
+  mutate(period = "future")
+
+annual_observed <- historic_data %>%
+  group_by(park_unit, year) %>%
+  summarize(Observed = sum(RecreationVisitors, na.rm = TRUE), .groups = "drop")
+
+annual_pred <- bind_rows(annual_hindcast, annual_future)
+
+
+top_park <- "GRTE" # park_models %>% arrange(desc(adj_r2)) %>% slice(1) %>% pull(park_unit)
+
+plot_df <- annual_pred %>%
+  filter(park_unit == top_park) %>%
+  select(park_unit, year, period, Pred_High, Pred_Low) %>%
+  left_join(annual_observed %>% 
+              filter(park_unit == top_park),
+            by = c("park_unit","year"))
+
+ggplot(plot_df, aes(x = year)) +
+  geom_line(aes(y = Pred_High, linetype = period)) +
+  geom_line(aes(y = Pred_Low,  linetype = period)) +
+  geom_line(aes(y = Observed), color = "blue") +
+  labs(title = paste0(top_park, ": Observed vs. Modeled Visitation"),
+       y = "Annual visitation",
+       linetype = "Prediction period") +
+  theme_minimal(base_size = 12)
+
+# making the exposure indicators
+baseline_obs <- annual_observed %>%
+  filter(year == 2025) %>%
+  transmute(park_unit, Reference_Observed = Observed)
+
+targets_2050 <- annual_future %>%
+  filter(year == 2050) %>%
+  rename(Future_Temperature_High = Pred_High,
+         Future_Temperature_Low = Pred_Low) %>%
+  select(park_unit, year, Future_Temperature_High, Future_Temperature_Low)
+
+fut_temp_indicators <- targets_2050 %>%
+  left_join(baseline_obs, by = "park_unit") %>%
+  mutate(Year_Future = year,
+         Year_Reference = 2025L,
+         # percent change from 2050 vs observed 2025
+         high_percent_change_raw_real = (Future_Temperature_High - Reference_Observed) / Reference_Observed,
+         low_percent_change_raw_real  = (Future_Temperature_Low  - Reference_Observed) / Reference_Observed) %>%
+  add_standardized_indicators(prefix = "percent_change")
+```
+
+
+```{r old way, eval = FALSE}
+# historical:
+units <- getParkSystem() %>% 
+  filter(!STATE %in% c("AK", "HI", "PR", "AS", "GU", "MP", "VI")) %>% 
+  filter(park_unit != "DRTO") %>% 
+  group_by(park_unit) %>% 
+  summarize() %>% 
+  sf::st_centroid() 
+
+for(i in 1:nrow(units)){
+  
+  unit <- units[i,]
+  temp_data <- climateR::getGridMET(AOI = unit,
+                                    varname = c("tmmx", "tmmn"),
+                                    startDate = "2010-01-01",
+                                    endDate = "2025-12-31") %>%
+    mutate(month = lubridate::ym(substr(date, 1, 7))) %>%
+    group_by(month) %>%
+    summarize(tmean_C = ((mean(tmmn, na.rm = TRUE) + mean(tmmx, na.rm = TRUE))/2) -273.15)
+  
+  write_csv(temp_data, paste0("data/all/gridmet_temperature/", unit$park_unit, ".csv"))
+  
+  print(unit$park_unit)
+  
+}
+
+historical_data <- list.files("data/all/gridmet_temperature/", full.names = TRUE) %>%
+  map_dfr(~read_csv(.x) %>% 
+            mutate(park_unit = str_extract(basename(.x), "^[A-Z]{4}")))
+
+
+# future: 
+future_data <- vector("list", length = nrow(units))
+
+for(i in 1:nrow(units)){
+  
+  try(future_data[[i]] <- fread(paste0("data/all/climate_selection/temp_clim/", units[i,] %>% .$park_unit, ".csv")) %>%
+        filter(GCM == unique(.$GCM)[1])  %>%
+        mutate(park_unit = units[i,] %>% .$park_unit, 
+               mean = (`Tavg (F)` - 32) * 5/9,
+               month = lubridate::ym(substr(Date, 1, 7))) %>%
+        group_by(month, park_unit) %>%
+        summarize(tmean_C = mean(mean, na.rm = TRUE)) %>%
+        select(tmean_C, mean, park_unit))
+}
+
+future_data <- future_data %>%
+  bind_rows()
+
+
+temperature <- bind_rows(historical_data, future_data)
+
+# visitation data:
+all_dat <- function(park_unit){
+  park_visitation <- getUnitVisitation(units = park_unit, startYear = 1900, endYear = 2025)
+}
+s = Sys.time()
+visitation <- getParkSystem() %>%
+  distinct(park_unit) %>%
+  pull(park_unit) %>%
+  map(possibly(~ all_dat(.x), otherwise = NULL)) %>%
+  keep(~!is.null(.)) %>%
+  bind_rows() %>%
+  mutate(month = make_date(year = Year, month = Month, day = 1))
+Sys.time() - s
+
+
+# bind all together:
+all_data <- temperature %>%
+  inner_join(visitation, by = c("park_unit" = "UnitCode", "month"))
+
+# load Kristen's stored data
+load("~/Desktop/0_my_git/nps_water_vulnerability/data/all/Visitation_Projection/Explore_Visitation_Temperature.RData")
+
+#`all_dat` is object she stored with all necessary historical info
+# climate_future is the object stored with all necessary future info
+
+# ...remove all else:
+rm(list = setdiff(ls(), c("all_dat", "climate_future")))
+
+source("setup.R")
+
+historic_data <- all_dat %>% 
+  rename(month = Month, year = Year) %>%
+  select(ym, year, month, park_unit, RecreationVisitors, tmean_C)
+
+# peak historical monthly average visitation per park, for caps
+historic_average_cap <- historic_data %>%
+  group_by(park_unit, month) %>%
+  summarize(avg_visit = mean(RecreationVisitors, na.rm = TRUE), .groups = "drop_last") %>%
+  filter(avg_visit == max(avg_visit)) %>%
+  ungroup() %>%
+  mutate(visit_cap_upper = avg_visit * 1.25,  # High = looser ceiling (+25%)
+         visit_cap_lower = avg_visit * 1.05) %>%   # Low  = tighter ceiling (+5%)
+  select(park_unit, visit_cap_upper, visit_cap_lower)
+
+future_data <- climate_future %>%
+  mutate(year = year(ym), 
+         month = month(ym)) %>%
+  select(ym, year, month, park_unit, tmean_C)
+
+# fit NULL model, linear, quadratic, and cubic models for each park. select best by BIC
+fit_and_select <- function(df) {
+  long_enough <- nrow(df) >= 14*12 &&
+    sum(!is.na(df$RecreationVisitors)) >= 14*12 &&
+    sum(!is.na(df$tmean_C)) >= 14*12
+  if (!long_enough) {
+    return(tibble(model_name = "null",
+                  bic = NA_real_,
+                  adj_r2 = NA_real_,
+                  model = list(lm(RecreationVisitors ~ 1, data = df))))
+  }
+  
+  models <- list(null = lm(RecreationVisitors ~ 1, data = df),
+                 linear = lm(RecreationVisitors ~ tmean_C, data = df),
+                 quadratic = lm(RecreationVisitors ~ poly(tmean_C, 2, raw = TRUE), data = df),
+                 cubic = lm(RecreationVisitors ~ poly(tmean_C, 3, raw = TRUE), data = df))
+  
+  stats <- tibble(model_name = names(models),
+                  model = unname(models),
+                  bic = map_dbl(models, BIC),
+                  # for r2, record NA_real_ if nothing is returned.
+                  # otherwise, convert the adjusted r2 to a plain numeric value.
+                  adj_r2 = map_dbl(models, function(m){
+                    val <- suppressWarnings(broom::glance(m)$adj.r.squared)
+                    if (length(val) == 0 || is.na(val)) NA_real_ else as.numeric(val)
+                  })
+  ) %>%
+    slice_min(bic, n = 1, with_ties = FALSE)
+  return(stats)
+}
+
+park_models <- historic_data %>%
+  group_by(park_unit) %>%
+  group_modify(~ fit_and_select(.x)) %>%
+  ungroup() %>%
+  mutate(temp_in_model = model_name != "null",
+         temp_sensitive = temp_in_model & !is.na(adj_r2) & adj_r2 >= 0.5)
+
+# predict for all parks:
+predict_one_park <- function(mod, newdf) {
+  if (nrow(newdf) == 0) return(newdf %>% mutate(.pred = numeric(0)))
+  newdf %>% mutate(.pred = as.numeric(predict(mod, newdata = newdf)))
+}
+
+# hindcast data
+historic_hindcasts <- historic_data %>%
+  filter(!is.na(park_unit), !is.na(month), !is.na(tmean_C)) %>%
+  nest(data = c(ym, year, month, tmean_C)) %>%
+  left_join(park_models %>% 
+              select(park_unit, model_name, bic, adj_r2, model, temp_sensitive),
+            by = "park_unit") %>%
+  mutate(pred = map2(model, data, predict_one_park)) %>%
+  select(park_unit, model_name, bic, adj_r2, temp_sensitive, pred) %>%
+  unnest(pred) %>%
+  transmute(park_unit, ym, year, month,
+            model_name, bic, adj_r2, temp_sensitive,
+            Pred_High = .pred,   
+            Pred_Low = .pred)
+
+# future predictions data
+future_predictions <- future_data %>%
+  filter(!is.na(park_unit), !is.na(month), !is.na(tmean_C)) %>%
+  nest(data = c(ym, year, month, tmean_C)) %>%
+  left_join(park_models %>% 
+              select(park_unit, model_name, bic, adj_r2, model, temp_sensitive),
+            by = "park_unit") %>%
+  filter(!is.na(bic)) %>%  # keep parks with a selected model
+  mutate(pred = map2(model, data, predict_one_park)) %>%
+  select(park_unit, model_name, bic, adj_r2, temp_sensitive, pred) %>%
+  unnest(pred) %>%
+  left_join(historic_average_cap, by = "park_unit") %>%
+  mutate(Pred_High = pmin(.pred, visit_cap_upper),  # looser ceiling (+25%)
+         Pred_Low = pmin(.pred, visit_cap_lower)) %>%   # tighter ceiling (+5%)
+  select(park_unit, ym, year, month, model_name, bic, adj_r2, temp_sensitive, Pred_High, Pred_Low)
+
+# aggregate annual vals
+annual_hindcast <- historic_hindcasts %>%
+  group_by(park_unit, year) %>%
+  summarize(Pred_High = sum(Pred_High, na.rm = TRUE),
+            Pred_Low = sum(Pred_Low,  na.rm = TRUE),
+            .groups = "drop") %>%
+  mutate(period = "hindcast")
+
+annual_future <- future_predictions %>%
+  group_by(park_unit, year) %>%
+  summarize(Pred_High = sum(Pred_High, na.rm = TRUE),
+            Pred_Low = sum(Pred_Low,  na.rm = TRUE),
+            .groups = "drop") %>%
+  mutate(period = "future")
+
+annual_observed <- historic_data %>%
+  group_by(park_unit, year) %>%
+  summarize(Observed = sum(RecreationVisitors, na.rm = TRUE), .groups = "drop")
+
+annual_pred <- bind_rows(annual_hindcast, annual_future)
+
+
+top_park <- "GRTE" # park_models %>% arrange(desc(adj_r2)) %>% slice(1) %>% pull(park_unit)
+
+plot_df <- annual_pred %>%
+  filter(park_unit == top_park) %>%
+  select(park_unit, year, period, Pred_High, Pred_Low) %>%
+  left_join(annual_observed %>% 
+              filter(park_unit == top_park),
+            by = c("park_unit","year"))
+
+ggplot(plot_df, aes(x = year)) +
+  geom_line(aes(y = Pred_High, linetype = period)) +
+  geom_line(aes(y = Pred_Low,  linetype = period)) +
+  geom_line(aes(y = Observed), color = "blue") +
+  labs(title = paste0(top_park, ": Observed vs. Modeled Visitation"),
+       y = "Annual visitation",
+       linetype = "Prediction period") +
+  theme_minimal(base_size = 12)
+
+# making the exposure indicators
+baseline_obs <- annual_observed %>%
+  filter(year == 2025) %>%
+  transmute(park_unit, Reference_Observed = Observed)
+
+targets_2050 <- annual_future %>%
+  filter(year == 2050) %>%
+  rename(Future_Temperature_High = Pred_High,
+         Future_Temperature_Low = Pred_Low) %>%
+  select(park_unit, year, Future_Temperature_High, Future_Temperature_Low)
+
+fut_temp_indicators <- targets_2050 %>%
+  left_join(baseline_obs, by = "park_unit") %>%
+  mutate(Year_Future = year,
+         Year_Reference = 2025L,
+         # percent change from 2050 vs observed 2025
+         high_percent_change_raw_real = (Future_Temperature_High - Reference_Observed) / Reference_Observed,
+         low_percent_change_raw_real  = (Future_Temperature_Low  - Reference_Observed) / Reference_Observed) %>%
+  add_standardized_indicators(prefix = "percent_change")
+```
+
+
+
+
+
+
+
+
+
+
+
+(Old way:)
+```{r, eval = FALSE}
+# Fisichelli et al. (2015) — Historical models
+# Assessments of future potential changes in visitation were limited to parks with temperature as an explanatory variable in the best-fit historical model and an adjusted R2 ≥ 0.5.
+# Kristen's stored data:
+load("~/Desktop/0_my_git/nps_water_vulnerability/data/all/Visitation_Projection/Explore_Visitation_Temperature.RData")
+
+
+#`all_dat` is object she stored with all necessary historical info
+# climate_future is the object stored with all necessary future info
+
+# ...remove all else:
+rm(list = setdiff(ls(), c("all_dat", "climate_future")))
+
+source("setup.R")
+
+historic_data <- all_dat %>% 
+  rename(month = Month, year = Year) %>%
+  select(ym, year, month, park_unit, RecreationVisitors, tmean_C)
+
+historic_average_cap <- historic_data %>%
+  group_by(park_unit, month) %>%
+  summarize(avg_visit = mean(RecreationVisitors, na.rm = TRUE)) %>%
+  group_by(park_unit) %>%
+  filter(avg_visit == max(avg_visit)) %>%
+  mutate(visit_cap_upper = avg_visit * 1.25,
+         visit_cap_lower = avg_visit * 1.05) %>%
+  select(park_unit, visit_cap_upper, visit_cap_lower)
+
+future_data <- climate_future %>%
+  mutate(year = year((ym)),
+         month = month((ym))) %>%
+  select(ym, year, month, park_unit, tmean_C)
+
+
+# fit NULL model, linear, quadratic, and cubic models for each park. select best by BIC
+fit_and_select <- function(df) {
+  
+  # return NA if not enough monthly data
+  if (nrow(df) < 14*12 || sum(!is.na(df$RecreationVisitors)) < 14*12 || sum(!is.na(df$tmean_C)) < 14*12) {
+    return(tibble(
+      model_name = "null",
+      bic = NA_real_,
+      adj_r2 = NA_real_,
+      model = list(lm(RecreationVisitors ~ 1, data = df))
+    ))
+  }
+  
+  # create lm of visitation against linear, quadratic, and cubic temperature
+  models <- list(null = lm(RecreationVisitors ~ 1, data = df),
+                 linear = lm(RecreationVisitors ~ tmean_C, data = df),
+                 quadratic = lm(RecreationVisitors ~ poly(tmean_C, 2, raw = TRUE), data = df),
+                 cubic = lm(RecreationVisitors ~ poly(tmean_C, 3, raw = TRUE), data = df))
+  
+  stats <- tibble(model_name = names(models),
+                  model = unname(models),
+                  bic = map_dbl(models, ~ BIC(.x)),
+                  adj_r2 = map_dbl(models, ~ suppressWarnings(broom::glance(.x)$adj.r.squared %||% NA_real_))) %>%
+    slice_min(bic, n = 1, with_ties = FALSE)
+  
+  return(stats)
+  
+}
+
+park_models <- historic_data %>%
+  group_by(park_unit) %>%
+  # claude told me about this - it's a map for grouped data
+  group_modify(~ fit_and_select(.x)) %>%
+  ungroup() %>%
+  mutate(temp_in_model = model != "Null",
+         temp_sensitive = temp_in_model & adj_r2 >= 0.5)
+
+# plot for the best-fitting park
+example_data <- historic_data %>%
+  filter(park_unit == park_models %>% arrange(desc(adj_r2)) %>% slice(1) %>% pull(park_unit)) %>%
+  select(tmean_C, RecreationVisitors) %>%
+  arrange(tmean_C)
+
+best_model <- park_models %>% filter(park_unit == park_models %>% arrange(desc(adj_r2)) %>% slice(1) %>% pull(park_unit)) %>% pull(model_name)
+
+best_fit <- switch(best_model,
+                   "null" = lm(RecreationVisitors ~ 1, data = example_data),
+                   "linear"  = lm(RecreationVisitors ~ tmean_C, data = example_data),
+                   "quadratic"  = lm(RecreationVisitors ~ poly(tmean_C, 2, raw = TRUE), data = example_data),
+                   "cubic"  = lm(RecreationVisitors ~ poly(tmean_C, 3, raw = TRUE), data = example_data))
+
+example_pred <- example_data %>%
+  mutate(yhat = predict(best_fit, newdata = example_data))
+
+ggplot(example_pred, aes(x = tmean_C, y = RecreationVisitors)) +
+  geom_point() +
+  geom_line(aes(y = yhat)) +
+  labs(title = sprintf("%s: %s (Adj R² = %.2f)",
+                       park_models %>% arrange(desc(adj_r2)) %>% slice(1) %>% pull(park_unit), best_model, broom::glance(best_fit)$adj.r.squared),
+       x = "Monthly mean air temperature (°C)",
+       y = "Monthly visitation") +
+  theme_minimal(base_size = 12)
+
+# apply each park’s best model to its future temps
+
+predict_one_park <- function(mod, newdf) {
+  # newdf needs tmean_C column even for null model (predict ignores it)
+  if (nrow(newdf) == 0) return(newdf %>% mutate(.pred = numeric(0)))
+  newdf %>%
+    mutate(.pred = as.numeric(predict(mod, newdata = newdf)))
+}
+
+
+# split future data by park, join in the model, predict, and bind back
+future_predictions <- future_data %>%
+  distinct() %>%
+  filter(!is.na(park_unit), !is.na(month), !is.na(tmean_C)) %>%
+  nest(data = c(tmean_C)) %>%
+  left_join(park_models %>% select(park_unit, model_name, bic, adj_r2, model, temp_sensitive),
+            by = "park_unit") %>%
+  filter(!is.na(bic)) %>%
+  # safely handle any weird model issues
+  mutate(pred = map2(model, data, ~ predict_one_park(.x, .y)),
+         .keep = "all") %>%
+  select(park_unit, ym, year, month, model_name, bic, adj_r2, temp_sensitive, pred) %>%
+  unnest(pred) %>%
+  left_join(historic_average_cap, by = "park_unit") %>%
+  mutate(Future_Temperature_High = ifelse(.pred >= visit_cap_upper, visit_cap_upper, .pred),
+         Future_Temperature_Low = ifelse(.pred >= visit_cap_lower, visit_cap_lower, .pred)) %>%
+  select(-.pred)
+
+predictions <- future_predictions %>%
+  bind_rows(historic_data %>%
+              rename(Future_Temperature_High = RecreationVisitors) %>%
+              mutate(Future_Temperature_Low = Future_Temperature_High)) %>%
+  group_by(park_unit, year) %>%
+  summarize(Future_Temperature_High = sum(Future_Temperature_High, na.rm = TRUE),
+            Future_Temperature_Low = sum(Future_Temperature_Low, na.rm = TRUE))
+
+fut_temp_indicators <- predictions %>%
+  filter(year == 2050) %>%
+  left_join(., historic_data %>%
+              group_by(park_unit, year) %>%
+              summarize(Reference_Observed = sum(RecreationVisitors, na.rm = TRUE)) %>%
+              filter(year == 2025),
+            by = "park_unit") %>%
+  rename(Year_Future = year.x, Year_Reference = year.y) %>%
+  left_join(., predictions %>% filter(year == 2025) %>%
+              select(park_unit,
+                     Reference_Temperature_High = Future_Temperature_High,
+                     Reference_Temperature_Low = Future_Temperature_Low),
+            by = "park_unit") %>%
+  mutate(high_percent_change_raw_real = (Future_Temperature_High - Reference_Observed) / Reference_Observed,
+         low_percent_change_raw_real = (Future_Temperature_Low - Reference_Observed) / Reference_Observed,
+         high_percent_change_raw_predict = (Future_Temperature_High - Reference_Temperature_High) / Reference_Temperature_High,
+         low_percent_change_raw_predict = (Future_Temperature_Low - Reference_Temperature_Low) / Reference_Temperature_Low) %>%
+  add_standardized_indicators(., prefix = "percent_change")
+
+
+ggplotly(ggplot(predictions %>% filter(park_unit == "GRTE")) +
+           geom_line(aes(x = year, y = Future_Temperature_High)) +
+           geom_line(aes(x = year, y = Future_Temperature_Low)) +
+           geom_line(data = historic_data %>%
+                       filter(park_unit == "GRTE") %>%
+                       group_by(park_unit, year) %>% 
+                       summarize(Reference_Observed = sum(RecreationVisitors, na.rm = TRUE)), aes(x = year, y = Reference_Observed),
+                     color = "blue")
+)
+```
+
+```{r}
+load("data/dissertation/loca_explorer.RData")
+
+park_subset <- unique(runoff_ma$park_unit)
+```

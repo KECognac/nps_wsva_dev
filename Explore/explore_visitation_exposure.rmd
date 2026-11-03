@@ -1,0 +1,796 @@
+---
+title: "nps_visitation_exploration"
+author: "Katie Willi"
+date: "2025-09-17"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(eval = TRUE, echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+Parks with timed entry:
+*SHEN; YOSE; ZION; ACAD; ARCH; GLAC; HALE; ROMO;*
+
+```{r, eval = TRUE}
+suppressMessages(source("setup.R"))
+```
+
+First, load in the water supply database. 
+We are only performing this rapid assessment on CONUS water supplies that are not municipal or hauled water supplies.
+```{r}
+# parks <- getParkSystem()
+# read in pre-saved park file
+suppressMessages(parks <- st_read("data/rapid/inputs/park_boundaries_2025-08-14.gpkg"))
+
+park_water_supplies <- parks %>% 
+  st_centroid() %>% 
+  st_transform(4326) %>% 
+  dplyr::mutate(y = st_coordinates(.)[,2], x = st_coordinates(.)[,1])
+
+# Read in water supply database for filtered parks
+
+
+table_path <- "data/Water_Supply_Systems/NPS_Water_Systems_Database_Joined.xlsx"
+
+
+water_supplies <- read_excel(table_path,
+                             sheet = 1,
+                             na = c("NA", "U"),
+                             skip = 1) %>%
+  dplyr::mutate(
+    source_longitude = as.numeric(source_longitude),
+    source_latitude = as.numeric(source_latitude)
+  ) %>%
+  filter(!state %in% c("AK", "AS", "HI", "MP", "PR", "VI")) %>%
+  left_join(
+    park_water_supplies %>% 
+      st_drop_geometry() %>% 
+      dplyr::select(UNIT_CODE, x, y),
+    by = c(park_unit = "UNIT_CODE")
+  ) %>% dplyr::mutate(
+    coords_flag = ifelse(
+      is.na(source_longitude) |
+        is.na(source_latitude),
+      "Centroid",
+      "Source Coordinates"
+    ),
+    source_longitude = ifelse(is.na(source_longitude), x, source_longitude),
+    source_latitude = ifelse(is.na(source_latitude), y, source_latitude)
+  ) %>%
+  # remove municipal and hauled source types, accounting for database entry errors
+  filter(!str_detect(source_type, regex("municipal|hauled", ignore_case = TRUE))) %>%
+  drop_na(source_longitude, source_latitude) %>%
+  st_as_sf(coords = (c("source_longitude", "source_latitude")),
+           crs = 4326,
+           remove = FALSE)
+```
+
+# Parkwide Exploration
+
+Grab visitation across the entire National Park Service so what the trends are like nationally:
+
+```{r}
+system_visitation <- getParkwideVisitation(startYear = 2010, endYear = 2024) 
+# for single park instead, use this - 
+# system_visitation <- getUnitVisitation(unit = "MISS", startYear = 2010, endYear = 2024) 
+
+# seasonal breakdown
+system_visitation <- system_visitation %>%
+  mutate(date = ym(paste0(Year, "-", Month)),
+         season = case_when(Month %in% c(12, 1, 2) ~ "Winter",
+                            Month %in% c(3, 4, 5) ~ "Spring",
+                            Month %in% c(6, 7, 8) ~ "Summer",
+                            Month %in% c(9, 10, 11) ~ "Fall"),
+         month_name = month.abb[Month],
+         season_month = factor(paste0(season, "_", month_name),
+                               levels = c("Winter_Jan","Winter_Feb","Spring_Mar","Spring_Apr","Spring_May",
+                                          "Summer_Jun","Summer_Jul","Summer_Aug",
+                                          "Fall_Sep","Fall_Oct","Fall_Nov",
+                                          "Winter_Dec")))
+
+# annual stats
+system_annual_visitation <- system_visitation %>%
+  group_by(Year) %>%
+  summarize(total_visitation = sum(RecreationVisitors))
+
+ggplot(system_visitation, aes(x = factor(Year), y = RecreationVisitors)) +
+  geom_boxplot(aes(color = ifelse(Year %in% c(2020, 2021), "COVID", "NonCOVID")),  
+               outlier.shape = NA,
+               fill = NA,  
+               size = 1) +
+  geom_jitter(aes(color = season_month),
+              width = 0.2,
+              alpha = 0.7,
+              size = 2) +
+  scale_color_manual(values = c("NonCOVID" = "grey70",
+                                "COVID"    = "tan",
+                                "Winter_Jan" = "#9ecae1", "Winter_Feb" = "#3182bd",
+                                "Spring_Mar" = "#006d2c", "Spring_Apr" = "#31a354", "Spring_May" = "#a1d99b",
+                                "Summer_Jun" = "#fbb4b9", "Summer_Jul" = "#f768a1", "Summer_Aug" = "#ae017e",
+                                "Fall_Sep"   = "#fee08b", "Fall_Oct"  = "#fdae61", "Fall_Nov"  = "#d73027",
+                                "Winter_Dec" = "#deebf7"),
+                     breaks = c("Winter_Jan","Winter_Feb","Spring_Mar","Spring_Apr","Spring_May",
+                                "Summer_Jun","Summer_Jul","Summer_Aug",
+                                "Fall_Sep","Fall_Oct","Fall_Nov","Winter_Dec"),
+                     labels = c("Winter_Jan" = "January",  "Winter_Feb" = "February",
+                                "Spring_Mar" = "March",    "Spring_Apr" = "April",   "Spring_May" = "May",
+                                "Summer_Jun" = "June",     "Summer_Jul" = "July",    "Summer_Aug" = "August",
+                                "Fall_Sep"   = "September","Fall_Oct"  = "October", "Fall_Nov"   = "November",
+                                "Winter_Dec" = "December")) +
+  scale_y_continuous(labels = label_number(accuracy = 1)) +
+  labs(x = "Year", y = "Recreation Visitors", color = "Month") +
+  theme_minimal() +
+  theme(legend.position = "right",
+        axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))
+```
+
+### Explore Total Park Visitation Through Time
+
+*Fit a simple linear regression of total annual visitation on year*
+
+```{r}
+linear_model <- lm((total_visitation) ~ Year, data = system_annual_visitation)
+
+summary(linear_model)
+
+# plot(linear_model)
+
+# intercept
+intercept <- coef(linear_model)[1]
+# visits/year
+slope <- coef(linear_model)[2]
+r_squared <- summary(linear_model)$r.squared
+adj_r_squared <- summary(linear_model)$adj.r.squared
+
+avg_visitation <- mean(system_annual_visitation$total_visitation)
+
+# average annual growth rate (scaled to mean visitation)
+annual_growth_rate <- (slope / avg_visitation) * 100
+
+# predictions for historical data
+system_annual_visitation$predicted <- predict(linear_model)
+system_annual_visitation$residuals <- residuals(linear_model)
+
+predictions <- predict(linear_model, newdata = tibble(Year =  2024:2100), interval = "prediction", level = 0.95)
+
+future_predictions <- tibble(Year = 2024:2100,
+                             predicted_visitation = predictions[,1],
+                             lower_95 = predictions[,2],
+                             upper_95 = predictions[,3])
+
+milestones <- future_predictions %>% filter(Year %in% c(2024, 2035, 2050, 2065, 2100))
+
+# tremd through time
+ggplot(system_annual_visitation, aes(x = Year)) +
+  geom_point(aes(y = total_visitation/1000000), color = "blue", size = 2, alpha = 0.7) +
+  geom_line(aes(y = predicted/1000000), color = "red", size = 1) +
+  geom_point(data = future_predictions, aes(x = Year, y = predicted_visitation/1000000), 
+             color = "red", size = 2, shape = 17) +
+  geom_ribbon(data = future_predictions, aes(x = Year, ymin = lower_95/1000000, ymax = upper_95/1000000), 
+              alpha = 0.2, fill = "red") +
+  labs(title = "NPS Parkwide Visitation",
+       subtitle = paste("R² =", round(r_squared, 3), "  Annual Growth Rate =", round(annual_growth_rate, 2), "%"),
+       x = "Year", 
+       y = "Annual Visits (Millions)") +
+  theme_minimal() +
+  theme(plot.title = element_text(size = 14, face = "bold"),
+        plot.subtitle = element_text(size = 12),
+        axis.text = element_text(size = 10),
+        axis.title = element_text(size = 12, face = "bold")) +
+  scale_y_continuous(labels = scales::comma_format()) +
+  scale_x_continuous(breaks = seq(1980, 2100, 10))
+```
+
+### Explore Seasonality of Visitation Through Time
+
+*Explore how the percentage distribution of visitors by month changes (or hasn't) through time, COVID years removed...*
+
+Parkwide totals indicate that visitors are showing up across more months through time. As in, visitation window is widening...
+
+```{r, echo = TRUE}
+# monthly percentages for each year (excluding COVID years 2020-2021)
+monthly_percentages <- system_visitation %>%
+  filter(!Year %in% c(2020, 2021)) %>%  # Remove COVID years
+  group_by(Year) %>%
+  mutate(annual_total = sum(RecreationVisitors),
+         monthly_percentage = (RecreationVisitors / annual_total) * 100) %>%
+  ungroup()
+
+# statistics by month across all years
+monthly_summary <- monthly_percentages %>%
+  group_by(month_name, Month) %>%
+  summarize(mean_pct = mean(monthly_percentage, na.rm = TRUE),
+            median_pct = median(monthly_percentage, na.rm = TRUE),
+            sd_pct = sd(monthly_percentage, na.rm = TRUE),
+            min_pct = min(monthly_percentage, na.rm = TRUE),
+            max_pct = max(monthly_percentage, na.rm = TRUE)) %>%
+  ungroup() %>%
+  arrange(Month)
+
+# monthly percentages over time
+ggplot(monthly_percentages, aes(x = Year, y = factor(Month, levels = 12:1, 
+                                                     labels = rev(month.abb)), 
+                                fill = monthly_percentage)) +
+  geom_tile() +
+  scale_fill_viridis_c(name = "% of Annual\nVisits") +
+  labs(title = "Monthly Visitation Distribution Over Time",
+       subtitle = "Percentage of annual visits occurring in each month",
+       x = "Year", 
+       y = "Month") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# coefficient of variation over time to see if seasonality is becoming more/less pronounced
+seasonal_variation <- monthly_percentages %>%
+  group_by(Year) %>%
+  summarize(cv_monthly = sd(monthly_percentage) / mean(monthly_percentage) * 100,
+            range_pct = max(monthly_percentage) - min(monthly_percentage),
+            .groups = 'drop')
+
+ggplot(seasonal_variation, aes(x = Year)) +
+  geom_line(aes(y = cv_monthly), color = "blue", size = 1) +
+  geom_smooth(aes(y = cv_monthly), method = "loess", se = TRUE, color = "red") +
+  labs(title = "Seasonality Strength Over Time",
+       subtitle = "Coefficient of variation in monthly percentages",
+       x = "Year", 
+       y = "Coefficient of Variation (%)") +
+  theme_minimal()
+
+decade_comparison <- monthly_percentages %>%
+  mutate(decade = floor(Year / 5) * 5) %>%
+  filter(decade %in% c(1980, 1985, 1990, 1995, 2000, 2005, 2010, 2015, 2020)) %>%
+  group_by(decade, month_name, Month) %>%
+  summarise(mean_pct = mean(monthly_percentage, na.rm = TRUE), .groups = 'drop')
+
+ggplot(decade_comparison, aes(x = reorder(month_name, Month), y = mean_pct, 
+                              color = factor(decade))) +
+  geom_line(aes(group = decade), size = 1) +
+  geom_point(size = 2) +
+  labs(title = "Monthly Distribution by Time Period",
+       subtitle = "Average percentage of annual visits by month and time period",
+       x = "Month", 
+       y = "% of Annual Visits",
+       color = "Time Period") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# test for overall change in seasonality
+seasonality_trend <- lm(cv_monthly ~ Year, data = seasonal_variation)
+cat(sprintf("\nOverall seasonality trend: %s (p = %.3f)\n", 
+            ifelse(coef(seasonality_trend)[2] > 0, "Increasing", "Decreasing"),
+            summary(seasonality_trend)$coefficients[2,4]))
+```
+
+### Miscellaneous
+
+*What's the largest visitation year for parks?*
+
+```{r, echo = FALSE}
+units <- parks %>%
+  pull(UNIT_CODE)
+
+peak_year_finder <- function(park_unit){
+  park_visitation <- getUnitVisitation(units = park_unit, startYear = 1970, endYear = 2024) %>%
+    group_by(UnitCode, Year) %>%
+    summarize(RecreationVisitors = sum(RecreationVisitors), .groups = "drop") %>%
+    filter(RecreationVisitors == max(RecreationVisitors, na.rm = TRUE)) 
+}
+
+highest_year <- units %>%
+  map(possibly(~ peak_year_finder(.), otherwise = NULL)) %>%
+  keep(~!is.null(.)) %>%
+  bind_rows() %>%
+  left_join(., parks, by = c("UnitCode" = "UNIT_CODE")) %>%
+  mutate(`Park Type` = ifelse(UNIT_TYPE == "National Park", "National Park", "Other Designation"))
+
+ggplot(data = highest_year) + 
+  geom_histogram(aes(x = Year, fill = `Park Type`), breaks = 1970:2024) +
+  theme_minimal()
+```
+
+# Park-specific "simple" visitation exposure
+
+Visitation-based exposure by fitting linear trends to annual NPS visitation (2010–2024) for each park, using predicted 2024 visitation as a baseline and projecting visitation to 2050. Parks with positive, "unconstrained" trends use their observed historical growth, while parks with timed entry, negative trends, or trends less than a "baseline" growth instead apply this baseline growth rate of 0.87% per year (NPS average) or I've also landed on something more conservative like 0.25% (this can be changed). Exposure is represented by the percent change in visitation from 2024 to 2050. A second indicator captures seasonality changes (ie widening of visitation window) by calculating the year-to-year coefficient of variation (CV) of monthly visitation shares (excluding COVID years), modeling how this CV changes over time, and projecting it to 2050. As it is, the indicator created for seasonality is only highlighting parks where the visitation window is widening, tho a narrowing visitation window would also be something interesting to capture. (APPA, CAJO, CEBE, EBLA truly have no visitation data - so these are NA in the final data frame.)
+```{r}
+park_visitation <- calc_visitation_exposure(water_supplies = water_supplies %>% select(park_name, park_unit),
+                                            baseline_growth_rate = 0.0025,
+                                            baseline_seasonality_shift = 1, # 1 = no mod to the park's raw CV trend
+                                            save = FALSE,
+                                            output_dir = NULL,
+                                            verbose = TRUE)
+```
+
+```{r}
+ggplot(park_visitation %>% distinct(park_unit, slope_adjustment), aes(x = slope_adjustment, fill = slope_adjustment)) +
+  geom_bar() +
+  labs(x = "Trend treatment",
+       y = "Number of parks",
+       title = "Parks and their trends") +
+  theme_bw() +
+  theme(legend.position = "none",axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+#### SLM exploration
+
+Fancy AI fig to compare un-capped vs capped growth at timed-entry parks. 
+
+```{r}
+# Enhanced comparison visualization function for all baseline scenarios
+compare_trend_methods <- function(park_unit, 
+                                  timed_entry_year = NULL,
+                                  baseline_growth_rate = 0.0025,
+                                  insufficient_data_threshold = 14 * 12) {
+  
+  # grab visitation data
+  visitation <- getUnitVisitation(units = park_unit, startYear = 2010, endYear = 2024)
+  
+  annual_visitation <- visitation %>%
+    group_by(Year) %>%
+    summarize(total = sum(RecreationVisitors), .groups = "drop")
+  
+  # OG method (full trend 2010-2024 extrapolated to 2050)
+  lm_original <- lm(total ~ Year, data = annual_visitation)
+  original_slope <- coef(lm_original)[2]
+  intercept <- coef(lm_original)[1]
+  
+  pred_2024 <- annual_visitation %>% filter(Year == 2024) %>% pull(total)
+  pred_2050_orig <- predict(lm_original, newdata = data.frame(Year = 2050))
+  pct_change_orig <- (pred_2050_orig - pred_2024) / pred_2024
+  
+  # Check all conditions for baseline adjustment
+  negative_trend <- original_slope < 0
+  has_timed_entry <- !is.null(timed_entry_year)
+  insufficient_data <- nrow(visitation) < insufficient_data_threshold
+  
+  baseline_slope <- pred_2024 * baseline_growth_rate
+  below_baseline <- original_slope < baseline_slope
+  
+  use_baseline <- negative_trend || has_timed_entry || insufficient_data || below_baseline
+  
+  # Determine reason for adjustment (priority order)
+  reason <- case_when(
+    insufficient_data ~ "insufficient_data",
+    negative_trend ~ "negative_trend",
+    has_timed_entry ~ "timed_entry",
+    below_baseline ~ "below_baseline",
+    TRUE ~ "none"
+  )
+  
+  # Create label for baseline method
+  baseline_label <- paste0("Baseline Growth (", baseline_growth_rate*100, "% annually)")
+  
+  # Create original prediction line (2010-2050)
+  pred_data_orig <- data.frame(Year = 2010:2050) %>%
+    mutate(predicted = predict(lm_original, newdata = .),
+           method = "Original (Unadjusted)")
+  
+  # Adjusted method with baseline growth
+  pred_data_adjusted <- NULL
+  
+  if(use_baseline) {
+    projection_slope <- baseline_slope
+    
+    pred_data_adjusted <- data.frame(Year = 2010:2050) %>%
+      mutate(predicted = case_when(
+        Year <= 2024 ~ predict(lm_original, newdata = data.frame(Year = Year)),
+        Year > 2024 ~ pred_2024 + (projection_slope * (Year - 2024))
+      ),
+      method = baseline_label)
+    
+    pred_2050_adj <- pred_2024 + (projection_slope * (2050 - 2024))
+    pct_change_adj <- (pred_2050_adj - pred_2024) / pred_2024
+    
+    subtitle_text <- sprintf(
+      "Original: %.1f%% | Baseline Growth (+%.1f%% annually): +%.1f%% | Change (2024-2050)",
+      pct_change_orig * 100, baseline_growth_rate*100, pct_change_adj * 100
+    )
+  } else {
+    subtitle_text <- sprintf("Projected change 2024-2050: %.1f%%", pct_change_orig * 100)
+  }
+  
+  # Combine prediction data
+  pred_data <- if(!is.null(pred_data_adjusted)) {
+    bind_rows(pred_data_orig, pred_data_adjusted)
+  } else {
+    pred_data_orig
+  }
+  
+  # Create named vectors for scales
+  color_values <- c("Original (Unadjusted)" = "#2166ac")
+  color_values[baseline_label] <- "#1b7837"
+  
+  linetype_values <- c("Original (Unadjusted)" = "dashed")
+  linetype_values[baseline_label] <- "solid"
+  
+  # Create plot
+  p1 <- ggplot() +
+    # Historical data points
+    geom_point(data = annual_visitation, aes(x = Year, y = total), 
+               size = 3, alpha = 0.7, color = "black") +
+    # Trend lines
+    geom_line(data = pred_data, aes(x = Year, y = predicted, color = method, linetype = method),
+              linewidth = 1.2) +
+    # Future projection zone
+    annotate("rect", xmin = 2024, xmax = 2050, ymin = -Inf, ymax = Inf,
+             fill = "gray90", alpha = 0.3) +
+    scale_color_manual(values = color_values) +
+    scale_linetype_manual(values = linetype_values)
+  
+  # Build caption based on reason for adjustment
+  caption_text <- case_when(
+    reason == "insufficient_data" ~ paste0(
+      "Note: Insufficient historical data (", nrow(visitation), " months, < ", 
+      insufficient_data_threshold, " required). Baseline growth (", 
+      baseline_growth_rate*100, "%) applied based on NPS system-wide trends."
+    ),
+    reason == "negative_trend" ~ paste0(
+      "Note: Negative historical trend replaced with ", baseline_growth_rate*100, 
+      "% baseline growth based on long-term NPS system-wide trends."
+    ),
+    reason == "timed_entry" ~ paste0(
+      "Note: Timed entry management constrains future growth; baseline rate (", 
+      baseline_growth_rate*100, "%) applied based on system-wide trends."
+    ),
+    reason == "below_baseline" ~ paste0(
+      "Note: Historical growth rate below NPS system baseline. Baseline rate (", 
+      baseline_growth_rate*100, "%) applied for conservative future projection."
+    ),
+    TRUE ~ ""  # Changed from NULL to empty string
+  )
+  
+  p1 <- p1 +
+    labs(title = paste("Visitation Trends:", park_unit),
+         subtitle = subtitle_text,
+         x = "Year", 
+         y = "Annual Recreation Visitors",
+         color = "Projection Method",
+         linetype = "Projection Method",
+         caption = if(caption_text != "") caption_text else NULL) +  # Only add caption if not empty
+    theme_minimal(base_size = 12) +
+    theme(legend.position = "bottom",
+          plot.title = element_text(face = "bold", size = 14),
+          plot.subtitle = element_text(size = 10, color = "gray40"),
+          plot.caption = element_text(size = 8, hjust = 0, color = "gray50", 
+                                      margin = margin(t = 10)),
+          panel.grid.minor = element_blank()) +
+    scale_y_continuous(labels = scales::comma) +
+    scale_x_continuous(breaks = seq(2010, 2050, by = 5))
+  
+  # Add vertical line for timed entry year if provided
+  if(has_timed_entry && reason == "timed_entry") {
+    p1 <- p1 + 
+      geom_vline(xintercept = timed_entry_year, linetype = "dotted", 
+                 color = "darkgreen", linewidth = 1) +
+      annotate("text", x = timed_entry_year, y = max(annual_visitation$total) * 1.05,
+               label = paste("Timed Entry\n", timed_entry_year),
+               hjust = 0.5, size = 3.5, fontface = "bold", color = "darkgreen")
+  }
+  
+  # Add 2024 marker
+  p1 <- p1 +
+    geom_vline(xintercept = 2024, linetype = "solid", 
+               color = "gray50", linewidth = 0.5, alpha = 0.7) +
+    annotate("text", x = 2024, y = min(annual_visitation$total) * 0.95,
+             label = "2024\n(Present)", hjust = 0.5, size = 3, color = "gray30")
+  
+  # Add trend indicator annotation with color coding
+  trend_color <- case_when(
+    reason == "negative_trend" ~ "darkred",
+    reason == "timed_entry" ~ "darkgreen",
+    reason == "insufficient_data" ~ "darkorange",
+    reason == "below_baseline" ~ "darkgoldenrod",
+    TRUE ~ "gray40"
+  )
+  
+  trend_tag <- case_when(
+    reason == "negative_trend" ~ " (NEGATIVE)",
+    reason == "timed_entry" ~ " (CONSTRAINED)",
+    reason == "insufficient_data" ~ " (LIMITED DATA)",
+    reason == "below_baseline" ~ " (BELOW BASELINE)",
+    TRUE ~ ""
+  )
+  
+  trend_label <- paste0(
+    "Historical Trend: ", 
+    ifelse(original_slope >= 0, "+", ""),
+    scales::comma(round(original_slope, 0)), 
+    " visitors/year",
+    trend_tag
+  )
+  
+  p1 <- p1 +
+    annotate("text", x = 2010, y = max(annual_visitation$total) * 0.88,
+             label = trend_label, hjust = 0, size = 3.5, 
+             fontface = "bold.italic",
+             color = trend_color)
+  
+  return(p1)
+}
+
+# Example usage for each scenario:
+
+# 1. Timed entry park
+compare_trend_methods(park_unit = "ROMO", timed_entry_year = 2020)
+
+# 2. Negative trend park
+compare_trend_methods(park_unit = "YOSE")  # Replace with actual park code
+
+# 3. Below baseline growth park
+compare_trend_methods(park_unit = "OLYM")  # Replace with actual park code
+
+# 4. Insufficient data park
+compare_trend_methods(park_unit = "FRST")  # Replace with actual park code
+```
+
+#### Exposure scores
+
+Park visitation trends
+
+```{r, echo = FALSE}
+mapview(park_visitation,
+  zcol = "visit_raw_pct_change",
+  layer.name = "Percent Increase in Visitation: 2024-2050",
+  col.regions = colorRampPalette(c("yellow", "orange", "red")))
+# decreasing percent means visitor window is shrinking
+mapview(park_visitation,
+        zcol = "visit_raw_cv_change",
+        layer.name = "Percent Change in Visitor Window: 2024-2050",
+        col.regions = colorRampPalette(c("black", "red", "orange", "yellow"))(50))
+
+# Create a diverging color palette function
+diverging_palette <- function(x) {
+  # Split into negative and positive
+  breaks <- seq(min(x, na.rm = TRUE), max(x, na.rm = TRUE), length.out = 101)
+  zero_idx <- which.min(abs(breaks))
+  
+  # Colors for negative values (blue to black)
+  neg_colors <- colorRampPalette(c("blue", "black"))(zero_idx)
+  # Colors for positive values (black to red, orange, yellow)
+  pos_colors <- colorRampPalette(c("black", "red", "orange", "yellow"))(101 - zero_idx)
+  
+  return(c(neg_colors, pos_colors))
+}
+```
+
+CV trends 
+the more negative (bluer), the tighter the visitation window gets. The more positive (yellower), the wider the visitation window gets. 
+
+Blue to black (negative), then black to red to orange to yellow (positive)
+
+```{r}
+mapview(park_visitation,
+        zcol = "visit_raw_cv_change",
+        layer.name = "Percent Change in Visitor Window: 2024-2050",
+        at = seq(min(park_visitation$visit_raw_cv_change, na.rm = TRUE),
+                 max(park_visitation$visit_raw_cv_change, na.rm = TRUE),
+                 length.out = 101),
+        col.regions = diverging_palette(park_visitation$visit_raw_cv_change),
+        legend = FALSE)
+
+```
+
+#### Change in seasonality examples
+
+Example of widening (top figure) and narrowing (bottom figure) park visitation season:
+
+```{r, echo = FALSE}
+# Identify top 5 and bottom 5 parks by change in CV
+top_bottom_cv <- park_visitation %>%
+  st_drop_geometry() %>%
+  arrange(desc(visit_raw_cv_change)) %>%
+  filter(!is.na(obs_2024)) %>%
+  mutate(rank_group = case_when(
+    row_number() <= 10 ~ "Top 5 (Increasing Seasonality)",
+    row_number() > n() - 10 ~ "Bottom 5 (Decreasing Seasonality)",
+    TRUE ~ "Middle"
+  )) %>%
+  filter(rank_group != "Middle") %>%
+  group_by(rank_group) %>%
+  slice_sample(n=1)
+
+# Get detailed monthly percentage data for these parks
+example_parks_cv_heatmap <- top_bottom_cv %>%
+  select(park_unit, park_name, visit_raw_cv_change, rank_group) %>%
+  mutate(monthly_data = map(park_unit, ~{
+    visitation <- getUnitVisitation(units = .x, startYear = 2010, endYear = 2024)
+    
+    # Calculate monthly percentages (excluding COVID years)
+    monthly_percentages <- visitation %>%
+      filter(!Year %in% c(2020, 2021)) %>%
+      group_by(Year) %>%
+      mutate(annual_total = sum(RecreationVisitors),
+             monthly_percentage = (RecreationVisitors / annual_total) * 100) %>%
+      ungroup()
+    
+    return(monthly_percentages)
+  })) %>%
+  unnest(monthly_data)
+
+# Create faceted heatmap
+ggplot(example_parks_cv_heatmap, aes(x = Year, y = factor(Month, levels = 12:1, 
+                                                          labels = rev(month.abb)), 
+                                     fill = monthly_percentage)) +
+  geom_tile() +
+  scale_fill_viridis_c(name = "% of Annual\nVisits") +
+  facet_wrap(~paste0(park_name, " (", round(visit_raw_cv_change*100, 1), "%)"), 
+             ncol = 1) +
+  labs(title = "Example Parks: Change in Monthly Visitation Distribution Over Time",
+       subtitle = "Percentage of annual visits occurring in each month (COVID years excluded)",
+       x = "Year", 
+       y = "Month") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        strip.text = element_text(size = 10, face = "bold"))
+
+
+#### Top and Bottom Parks by CV Change (Seasonality) - Time Series with Projections
+# Get detailed CV trend data for these parks
+example_parks_cv_trend <- top_bottom_cv %>%
+  select(park_unit, park_name, visit_raw_cv_change, rank_group) %>%
+  mutate(cv_trend_data = map(park_unit, ~{
+    visitation <- getUnitVisitation(units = .x, startYear = 2010, endYear = 2024)
+    
+    # Calculate monthly percentages (excluding COVID years)
+    monthly_pct <- visitation %>%
+      filter(!Year %in% c(2020, 2021)) %>%
+      group_by(Year) %>%
+      mutate(annual_total = sum(RecreationVisitors),
+             monthly_percentage = (RecreationVisitors / annual_total) * 100) %>%
+      ungroup()
+    
+    # Calculate CV for each year
+    seasonal_variation <- monthly_pct %>%
+      group_by(Year) %>%
+      summarize(cv_monthly = sd(monthly_percentage) / mean(monthly_percentage) * 100,
+                .groups = 'drop')
+    
+    # Fit linear model for CV trend
+    cv_model <- lm(cv_monthly ~ Year, data = seasonal_variation)
+    
+    # Get statistics
+    r_squared <- summary(cv_model)$r.squared
+    
+    # Predictions for historical data
+    seasonal_variation$predicted <- predict(cv_model)
+    
+    # Future predictions (2024-2050)
+    predictions <- predict(cv_model, newdata = tibble(Year = 2024:2050), 
+                           interval = "prediction", level = 0.95)
+    
+    future_predictions <- tibble(Year = 2024:2050,
+                                 predicted_cv = predictions[,1],
+                                 lower_95 = predictions[,2],
+                                 upper_95 = predictions[,3])
+    
+    list(
+      historical = seasonal_variation,
+      future = future_predictions,
+      r_squared = r_squared
+    )
+  }))
+
+# Create individual plots for each park
+cv_plots_list <- example_parks_cv_trend %>%
+  rowwise() %>%
+  mutate(plot = list({
+    ggplot(cv_trend_data$historical, aes(x = Year)) +
+      geom_line(aes(y = cv_monthly), color = "blue", size = 1) +
+      geom_point(aes(y = cv_monthly), color = "blue", size = 2, alpha = 0.7) +
+      geom_line(aes(y = predicted), color = "red", size = 1) +
+      geom_point(data = cv_trend_data$future, aes(x = Year, y = predicted_cv), 
+                 color = "red", size = 2, shape = 17) +
+      geom_ribbon(data = cv_trend_data$future, 
+                  aes(x = Year, ymin = lower_95, ymax = upper_95), 
+                  alpha = 0.2, fill = "red") +
+      annotate("rect", xmin = 2024, xmax = 2050, ymin = -Inf, ymax = Inf,
+               fill = "gray90", alpha = 0.3) +
+      geom_vline(xintercept = 2024, linetype = "solid", 
+                 color = "gray50", linewidth = 0.5, alpha = 0.7) +
+      labs(title = paste0(park_name, " (", park_unit, ")"),
+           subtitle = paste("R² =", round(cv_trend_data$r_squared, 3), 
+                            " | Projected CV Change 2024-2050 =", 
+                            round(visit_raw_cv_change * 100, 1), "%"),
+           x = "Year", 
+           y = "Coefficient of Variation (%)") +
+      theme_minimal() +
+      theme(plot.title = element_text(size = 12, face = "bold"),
+            plot.subtitle = element_text(size = 10),
+            axis.text = element_text(size = 9),
+            axis.title = element_text(size = 10, face = "bold")) +
+      scale_x_continuous(breaks = seq(2010, 2050, 10))
+  }))
+
+ggarrange(
+  cv_plots_list$plot[[2]], 
+  cv_plots_list$plot[[1]],  
+  ncol = 1
+)
+```
+
+#### Change in total visitation examples
+
+Example of low (top) and high (bottom) change in visitation:
+
+```{r, echo = FALSE}
+# top 5 and bottom 5 parks by percent change in visitation
+top_bottom_growth <- park_visitation %>%
+  st_drop_geometry() %>%
+  arrange(desc(visit_raw_pct_change)) %>%
+  filter(!is.na(obs_2024)) %>%
+  mutate(rank_group = case_when(
+    row_number() <= 10 ~ "Top 5 (Highest Growth)",
+    row_number() > n() - 10 ~ "Bottom 5 (Lowest Growth)",
+    TRUE ~ "Middle"
+  )) %>%
+  filter(rank_group != "Middle") %>%
+  group_by(rank_group) %>%
+  slice_sample(n=1)
+
+
+top_bottom_growth <- park_visitation %>%
+  filter(park_unit %in% c("PORE", "BICY")) %>%
+          group_by(park_unit) %>%
+  slice(1)
+         
+# Get detailed trend data for these parks
+example_parks_growth <- top_bottom_growth %>%
+  select(park_unit, park_name, visit_raw_pct_change) %>%
+  mutate(trend_data = map(park_unit, ~{
+    visitation <- getUnitVisitation(units = .x, startYear = 2010, endYear = 2024)
+    annual_visitation <- visitation %>%
+      group_by(Year) %>%
+      summarize(total_visitation = sum(RecreationVisitors), .groups = "drop")
+    linear_model <- lm(total_visitation ~ Year, data = annual_visitation)
+    r_squared <- summary(linear_model)$r.squared
+    annual_visitation$predicted <- predict(linear_model)
+    predictions <- predict(linear_model, newdata = tibble(Year = 2024:2050), 
+                           interval = "prediction", level = 0.95)
+    
+    future_predictions <- tibble(Year = 2024:2050,
+                                 predicted_visitation = predictions[,1],
+                                 lower_95 = predictions[,2],
+                                 upper_95 = predictions[,3])
+    
+    list(annual = annual_visitation,
+         future = future_predictions,
+         r_squared = r_squared)
+  }))
+
+# plots for each park
+plots_list <- example_parks_growth %>%
+  rowwise() %>%
+  mutate(plot = list({
+    ggplot(trend_data$annual, aes(x = Year)) +
+      geom_point(aes(y = total_visitation/1000000), color = "blue", size = 2, alpha = 0.7) +
+      geom_line(aes(y = predicted/1000000), color = "red", size = 1) +
+      geom_point(data = trend_data$future, aes(x = Year, y = predicted_visitation/1000000), 
+                 color = "red", size = 2, shape = 17) +
+      geom_ribbon(data = trend_data$future, 
+                  aes(x = Year, ymin = lower_95/1000000, ymax = upper_95/1000000), 
+                  alpha = 0.2, fill = "red") +
+      annotate("rect", xmin = 2024, xmax = 2050, ymin = -Inf, ymax = Inf,
+               fill = "gray90", alpha = 0.3) +
+      geom_vline(xintercept = 2024, linetype = "solid", 
+                 color = "gray50", linewidth = 0.5, alpha = 0.7) +
+      labs(title = paste0(park_name, " (", park_unit, ")"),
+           subtitle = paste("R² =", round(trend_data$r_squared, 3), 
+                            " | Projected Change 2024-2050 =", 
+                            round(visit_raw_pct_change, 1), "%"),
+           x = "Year", 
+           y = "Annual Visits (Millions)") +
+      theme_minimal() +
+      theme(plot.title = element_text(size = 12, face = "bold"),
+            plot.subtitle = element_text(size = 10),
+            axis.text = element_text(size = 9),
+            axis.title = element_text(size = 10, face = "bold")) +
+      scale_y_continuous(labels = scales::comma_format()) +
+      scale_x_continuous(breaks = seq(2010, 2050, 10))
+  }))
+
+ggarrange(
+  plots_list$plot[[2]],  
+  plots_list$plot[[1]],
+  ncol = 1)
+```
+
