@@ -36,8 +36,8 @@ Save water supplies to app data
 To create appropriate buffers (i.e., smooth instead of jagged), need to apply st_buffer to sf object in a UTM CRS (instead of lat/long)
 
 ```{r}
-water_supplies_buffer <- water_supplies %>% 
-  st_transform(crs = 32616) %>% 
+water_supplies_buffer <- water_supplies |> 
+  st_transform(crs = 32616) |> 
   st_buffer(dist = 4000)
 ```
 
@@ -196,15 +196,15 @@ storm_surge_exp <- calc_storm_surge_exposure(water_supplies = water_supplies,
 ```{r}
 # Read buffered (4 km) water supply scenarios, filter to valid inundation files
 ws_slr_scenarios <- sf::st_read(here("data", "rapid", "inputs", "coast_comp",
-                                     "buff_ws_inun_regions.gpkg")) %>%
+                                     "buff_ws_inun_regions.gpkg")) |>
   filter(!is.na(proj_file))
 
 # Right-join all water supplies onto ws_slr_scenarios:
-ws_all <- ws_slr_scenarios %>%
-  select(-park_unit) %>%
+ws_all <- ws_slr_scenarios |>
+  select(-park_unit) |>
   right_join(
-    water_supplies %>%
-      st_drop_geometry() %>%
+    water_supplies |>
+      st_drop_geometry() |>
       select(wsd_source_id, park_unit),
     by = "wsd_source_id"
   )
@@ -366,7 +366,7 @@ runoff_sen <- calc_runoff_sensitivity(water_supplies,
                                       water_year = TRUE,
                                       save = TRUE,
                                       output_dir = "data/rapid/outputs/",
-                                      verbose = TRUE) %>%
+                                      verbose = TRUE) |>
   # additional metadata, don't necessarily need but interesting to review as we finalize indicator
   select(-c(n_years, trend_direction, mk_significant))
 ```
@@ -382,7 +382,7 @@ precip_sen <- calc_precip_sensitivity(water_supplies,
                                       water_year = TRUE,
                                       save = TRUE,
                                       output_dir = "data/rapid/outputs/",
-                                      verbose = TRUE) %>%
+                                      verbose = TRUE) |>
   # additional metadata, don't necessarily need but interesting to review as we finalize indicator
   select(-c(n_years, trend_direction, mk_significant))
 ```
@@ -398,7 +398,7 @@ swe_sen <- calc_swe_sensitivity(water_supplies,
                                 water_year = TRUE,
                                 save = TRUE,
                                 output_dir = "data/rapid/outputs/",
-                                verbose = TRUE) %>%
+                                verbose = TRUE) |>
   # additional metadata, don't necessarily need but interesting to review as we finalize indicator
   select(-c(n_years, trend_direction, mk_significant))
 ```
@@ -464,7 +464,7 @@ nearby_use_sen_old <- calc_nearby_use_sensitivity_old(water_supplies,
                                                       observed_use = fread("data/all/RPAWaterDemand/1_BaseData/Trash 2022/usgswithdrawals.csv"),
                                                       save = TRUE,
                                                       output_dir = "data/rapid/outputs/",
-                                                      verbose = TRUE) %>%
+                                                      verbose = TRUE) |>
   # additional metadata exists, don't necessarily need but some are interesting to review as we finalize indicator
   select(wsd_source_id, park_unit,
          raw_avg_nearby_use_per_km2, raw_percent_slope_nearby_use_per_km2, 
@@ -493,7 +493,7 @@ visitation_sen <- calc_visitation_sensitivity(water_supplies,
                                               end_year = 2025,
                                               save = TRUE,
                                               output_dir = "data/rapid/outputs/",
-                                              verbose = TRUE) %>%
+                                              verbose = TRUE) |>
   # additional metadata exists, don't necessarily need but some are interesting to review as we finalize indicator
   select(wsd_source_id, park_unit,
          raw_avg_visitation, raw_scaled_trend_visitation,

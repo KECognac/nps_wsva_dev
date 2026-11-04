@@ -115,14 +115,14 @@ calc_storm_surge_exposure <- function(water_supplies,
   }
   
   # Prepare the storm surge data for indicator calculation
-  prepped_stations <- storm_surge_stations %>%
+  prepped_stations <- storm_surge_stations |>
     # Removing CMCC-CM2-VHR4 model since it has spurious results. 
-    dplyr::filter(!grepl("CMCC-CM2-VHR4", model)) %>% 
-    dplyr::group_by(station_idx) %>%
+    dplyr::filter(!grepl("CMCC-CM2-VHR4", model)) |> 
+    dplyr::group_by(station_idx) |>
     dplyr::mutate(raw_surge_change_max = future_mean - reference_mean,
-           raw_surge_pct_change_max = ((future_mean - reference_mean) / reference_mean) * 100) %>%
-    dplyr::slice_max(raw_surge_pct_change_max, n = 1, with_ties = FALSE) %>%
-    dplyr::ungroup() %>%
+           raw_surge_pct_change_max = ((future_mean - reference_mean) / reference_mean) * 100) |>
+    dplyr::slice_max(raw_surge_pct_change_max, n = 1, with_ties = FALSE) |>
+    dplyr::ungroup() |>
     dplyr::select(station_idx, model, raw_surge_change_max, raw_surge_pct_change_max, lat, lon)
   
   # Load coastal site geometries if a file path was supplied
@@ -134,7 +134,7 @@ calc_storm_surge_exposure <- function(water_supplies,
   # Project both layers to NAD83 / CONUS Albers for distance calculations
   if (verbose) {message("Projecting to CONUS Albers (EPSG:5070)...")}
 
-  ws_proj <- sf::st_transform(water_supplies, 5070) %>%
+  ws_proj <- sf::st_transform(water_supplies, 5070) |>
     # Join the coastal geometry information
     dplyr::left_join(coast_geometry, by = c("wsd_source_id", "park_unit", "park_name"))
 
@@ -152,26 +152,26 @@ calc_storm_surge_exposure <- function(water_supplies,
   nn_idx <- unlist(nn_result$nn)
   nn_dist_m <- unlist(nn_result$dist)
 
-  station_matches <- ws_coastal %>%
-    sf::st_drop_geometry() %>%
-    dplyr::select(wsd_source_id, park_unit, park_name, coast_dist_m, coast_elev_m) %>%
+  station_matches <- ws_coastal |>
+    sf::st_drop_geometry() |>
+    dplyr::select(wsd_source_id, park_unit, park_name, coast_dist_m, coast_elev_m) |>
     dplyr::mutate(
       raw_surge_change_max = stations_proj$raw_surge_change_max[nn_idx],
       raw_surge_pct_change_max = stations_proj$raw_surge_pct_change_max[nn_idx],
       nn_dist_m = nn_dist_m
-    ) %>%
+    ) |>
     # Supplies >50 km from the nearest surge station receive NA
     dplyr::mutate(dplyr::across(c(raw_surge_change_max, raw_surge_pct_change_max),
-                                ~ dplyr::if_else(nn_dist_m > 50000, NA_real_, .x))) %>%
+                                ~ dplyr::if_else(nn_dist_m > 50000, NA_real_, .x))) |>
     dplyr::select(-nn_dist_m)
 
   if (verbose) {message("Expanding to all water supplies and applying distance/elevation weighting...")}
 
   # Expand back to all water supplies; non-coastal / >50km sites get NA
-  results <- water_supplies %>%
-    sf::st_drop_geometry() %>%
-    dplyr::select(wsd_source_id, park_unit, park_name) %>%
-    dplyr::left_join(station_matches, by = c("wsd_source_id", "park_unit", "park_name")) %>%
+  results <- water_supplies |>
+    sf::st_drop_geometry() |>
+    dplyr::select(wsd_source_id, park_unit, park_name) |>
+    dplyr::left_join(station_matches, by = c("wsd_source_id", "park_unit", "park_name")) |>
     dplyr::mutate(
       # Coastal-proximity weight: 1 at the shoreline and 0 at or beyond 50km
       dist_weight = pmax(0, (1 - (coast_dist_m / 50000))),
@@ -180,14 +180,14 @@ calc_storm_surge_exposure <- function(water_supplies,
       # Joint weight: RMS blend to compensate for potential 0s from LECZ cap.
       joint_weight = sqrt((dist_weight^2 + elev_weight^2) / 2),
       raw_surge_change_max = raw_surge_change_max * joint_weight,
-      raw_surge_pct_change_max = raw_surge_pct_change_max * joint_weight) %>%
+      raw_surge_pct_change_max = raw_surge_pct_change_max * joint_weight) |>
     dplyr::select(-c(coast_dist_m, dist_weight, elev_weight, joint_weight))
   
   if (verbose) {message("Standardizing indicators to 0-1...")}
 
   # Standardize all indicators to 0-1
-  final_results <- results %>%
-    add_standardized_indicators("raw_surge_change_max", invert = FALSE) %>%
+  final_results <- results |>
+    add_standardized_indicators("raw_surge_change_max", invert = FALSE) |>
     add_standardized_indicators("raw_surge_pct_change_max", invert = FALSE)
   
   # Save results

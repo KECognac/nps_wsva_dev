@@ -227,13 +227,13 @@ calc_drought_exposure <- function(water_supplies,
   
   select_cols <- unique(c(required_cols, intersect(optional_cols, available_cols)))
   
-  climate_monthly <- ds %>%
-    dplyr::select(dplyr::all_of(select_cols)) %>%
+  climate_monthly <- ds |>
+    dplyr::select(dplyr::all_of(select_cols)) |>
     dplyr::filter(
       wsd_source_id %in% water_supplies$wsd_source_id,
       park_unit %in% water_supplies$park_unit
-    ) %>%
-    dplyr::collect() %>%
+    ) |>
+    dplyr::collect() |>
     data.table::as.data.table()
   
   if (!nrow(climate_monthly)) {
@@ -793,10 +793,10 @@ calc_drought_exposure <- function(water_supplies,
     by = .(park_unit, wsd_source_id)
   ]
   
-  final_results <- summary_dt %>%
-    dplyr::as_tibble() %>%
-    add_standardized_indicators("raw_spei_change", invert = TRUE) %>%
-    add_standardized_indicators("raw_spei_models_showing_decrease") %>%
+  final_results <- summary_dt |>
+    dplyr::as_tibble() |>
+    add_standardized_indicators("raw_spei_change", invert = TRUE) |>
+    add_standardized_indicators("raw_spei_models_showing_decrease") |>
     dplyr::select(wsd_source_id, park_unit, dplyr::everything())
   
   if (save) {

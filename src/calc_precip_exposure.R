@@ -117,13 +117,13 @@ calc_precip_exposure <- function(water_supplies,
   
   if(hindcast == FALSE){
     # if we want to use training data... select associated files
-    files <- list.files(precip_data, full.names = TRUE) %>%
-      grep("2015|2045|2075|livneh_unsplit", ., value = TRUE)
+    files <- list.files(precip_data, full.names = TRUE) |>
+      grep("2015|2045|2075|livneh_unsplit", x = _, value = TRUE)
     
   } else if(hindcast == TRUE){
     # if we want to use hindcast climate data... 
-    files <- list.files(precip_data, full.names = TRUE) %>%
-      grep("training|livneh_unsplit", .,  invert = TRUE, value = TRUE)
+    files <- list.files(precip_data, full.names = TRUE) |>
+      grep("training|livneh_unsplit", x = _, invert = TRUE, value = TRUE)
   } 
   
   files_dt <- data.table::data.table(file = files)
@@ -178,7 +178,7 @@ calc_precip_exposure <- function(water_supplies,
   # grids and times
   process_raw_grid_data <- function(f) {
     
-    raw <- arrow::read_parquet(f) %>%
+    raw <- arrow::read_parquet(f) |>
       dplyr::filter(wsd_source_id %in% water_supplies$wsd_source_id)
     
     annual_points <- data.table::as.data.table(raw)[
@@ -227,7 +227,7 @@ calc_precip_exposure <- function(water_supplies,
     process_raw_grid_data(.x)
   })
   
-  combined_data <- mean_data %>% dplyr::bind_rows()
+  combined_data <- mean_data |> dplyr::bind_rows()
   
   data.table::setDT(combined_data)  
   
@@ -264,8 +264,8 @@ calc_precip_exposure <- function(water_supplies,
   if(hindcast == TRUE){
     
     # distinct (model, scenario) pairs that exist in the past and future
-    ssps <- combined_data %>%
-      dplyr::filter(!ssp %in% c("1950-2014", "historical")) %>%
+    ssps <- combined_data |>
+      dplyr::filter(!ssp %in% c("1950-2014", "historical")) |>
       dplyr::distinct(model, ssp, run)
     
     precipitation_change_sub <- vector("list", length = nrow(ssps))
@@ -274,39 +274,39 @@ calc_precip_exposure <- function(water_supplies,
       
       ssp_sub <- ssps[i,]
       
-      hindcast_historical <- combined_data %>%
+      hindcast_historical <- combined_data |>
         dplyr::filter(model == ssp_sub$model,
                ssp == "historical",
-               run == ssp_sub$run) %>%
+               run == ssp_sub$run) |>
         dplyr::filter(year >= hist_start_year & year <= hist_end_year)
       
       # if our historical record is actually considered "future" data...
-      hindcast_future <- combined_data %>%
+      hindcast_future <- combined_data |>
         dplyr::filter(model == ssp_sub$model,
                ssp == ssp_sub$ssp,
-               run == ssp_sub$run) %>%
+               run == ssp_sub$run) |>
         dplyr::filter(year >= hist_start_year & year <= hist_end_year,
                !year %in% unique(hindcast_historical$year))
       
-      historical_complete <- hindcast_historical %>%
-        dplyr::bind_rows(hindcast_future) %>%
-        dplyr::group_by(wsd_source_id, park_unit) %>%
+      historical_complete <- hindcast_historical |>
+        dplyr::bind_rows(hindcast_future) |>
+        dplyr::group_by(wsd_source_id, park_unit) |>
         dplyr::summarize(precipitation_historical = mean(total_precipitation, na.rm = TRUE),
                   range_historical = paste0(min(year), "-", max(year)),
                   .groups = "drop")
       
-      future_complete <- combined_data %>% 
+      future_complete <- combined_data |> 
         dplyr::filter(model == ssp_sub$model,
                ssp == ssp_sub$ssp,
-               run == ssp_sub$run) %>%
-        dplyr::filter(year >= future_start_year & year <= future_end_year) %>%
-        dplyr::group_by(wsd_source_id, park_unit) %>%
+               run == ssp_sub$run) |>
+        dplyr::filter(year >= future_start_year & year <= future_end_year) |>
+        dplyr::group_by(wsd_source_id, park_unit) |>
         dplyr::summarize(precipitation_future = mean(total_precipitation, na.rm = TRUE),
                   period_future = paste0(min(year), "-", max(year)),
                   .groups = "drop")
       
-      precipitation_change_sub[[i]] <- future_complete %>%
-        dplyr::inner_join(., historical_complete, by = c("wsd_source_id", "park_unit")) %>%
+      precipitation_change_sub[[i]] <- future_complete |>
+        dplyr::inner_join(historical_complete, by = c("wsd_source_id", "park_unit")) |>
         dplyr::mutate(model = ssp_sub$model,
                ssp = ssp_sub$ssp,
                run = ssp_sub$run,
@@ -319,14 +319,14 @@ calc_precip_exposure <- function(water_supplies,
   } else if(hindcast == FALSE){
     
     # distinct (model, scenario) pairs that exist in the past and future
-    ssps <- combined_data %>%
-      dplyr::filter(ssp != "training" & ssp != "historical") %>%
+    ssps <- combined_data |>
+      dplyr::filter(ssp != "training" & ssp != "historical") |>
       dplyr::distinct(model, ssp, run)
     
-    training_historical <- combined_data %>%
-      dplyr::filter(ssp == "training" | ssp == "historical") %>%
-      dplyr::group_by(wsd_source_id, park_unit) %>%
-      dplyr::filter(year >= hist_start_year & year <= hist_end_year) %>%
+    training_historical <- combined_data |>
+      dplyr::filter(ssp == "training" | ssp == "historical") |>
+      dplyr::group_by(wsd_source_id, park_unit) |>
+      dplyr::filter(year >= hist_start_year & year <= hist_end_year) |>
       dplyr::summarize(precipitation_historical = mean(total_precipitation, na.rm = TRUE),
                 range_historical = paste0(min(year), "-", max(year)),
                 .groups = "drop")
@@ -337,18 +337,18 @@ calc_precip_exposure <- function(water_supplies,
       suppressMessages({suppressWarnings({
         ssp_sub <- ssps[i,]
         
-        future_complete <- combined_data %>% 
+        future_complete <- combined_data |> 
           dplyr::filter(model == ssp_sub$model,
                  ssp == ssp_sub$ssp,
-                 run == ssp_sub$run) %>%
-          dplyr::filter(year >= future_start_year & year <= future_end_year) %>%
-          dplyr::group_by(wsd_source_id, park_unit) %>%
+                 run == ssp_sub$run) |>
+          dplyr::filter(year >= future_start_year & year <= future_end_year) |>
+          dplyr::group_by(wsd_source_id, park_unit) |>
           dplyr::summarize(precipitation_future = mean(total_precipitation, na.rm = TRUE),
                     period_future = paste0(min(year), "-", max(year)),
                     .groups = "drop")
         
-        precipitation_change_sub[[i]] <- future_complete %>%
-          dplyr::inner_join(., training_historical, by = c("wsd_source_id", "park_unit")) %>%
+        precipitation_change_sub[[i]] <- future_complete |>
+          dplyr::inner_join(training_historical, by = c("wsd_source_id", "park_unit")) |>
           dplyr::mutate(model = ssp_sub$model,
                  ssp = ssp_sub$ssp,
                  run = ssp_sub$run,
@@ -366,55 +366,55 @@ calc_precip_exposure <- function(water_supplies,
   # calculate percentile indicators:
   suppressMessages({suppressWarnings({
     
-    p10_values <- precipitation_change %>%
-      dplyr::group_by(park_unit, wsd_source_id) %>%
+    p10_values <- precipitation_change |>
+      dplyr::group_by(park_unit, wsd_source_id) |>
       dplyr::mutate(p10 = stats::quantile(percent_change, 0.10, na.rm = TRUE),
-             diff_from_p10 = abs(percent_change - p10)) %>%
-      dplyr::filter(diff_from_p10 == min(diff_from_p10, na.rm = TRUE)) %>%
-      dplyr::slice(1) %>%  # take first if ties
-      dplyr::ungroup() %>%
+             diff_from_p10 = abs(percent_change - p10)) |>
+      dplyr::filter(diff_from_p10 == min(diff_from_p10, na.rm = TRUE)) |>
+      dplyr::slice(1) |>  # take first if ties
+      dplyr::ungroup() |>
       dplyr::select(wsd_source_id,
              park_unit,
              raw_precipitation_change_p10 = percent_change)
     
-    p50_values <- precipitation_change %>%
-      dplyr::group_by(park_unit, wsd_source_id) %>%
+    p50_values <- precipitation_change |>
+      dplyr::group_by(park_unit, wsd_source_id) |>
       dplyr::mutate(p50 = stats::median(percent_change, na.rm = TRUE),
-             diff_from_p50 = abs(percent_change - p50)) %>%
-      dplyr::filter(diff_from_p50 == min(diff_from_p50, na.rm = TRUE)) %>%
-      dplyr::slice(1) %>%  # take first if ties
-      dplyr::ungroup() %>%
+             diff_from_p50 = abs(percent_change - p50)) |>
+      dplyr::filter(diff_from_p50 == min(diff_from_p50, na.rm = TRUE)) |>
+      dplyr::slice(1) |>  # take first if ties
+      dplyr::ungroup() |>
       dplyr::select(wsd_source_id,
              park_unit,
              raw_precipitation_change_p50 = percent_change)
     
-    p90_values <- precipitation_change %>%
-      dplyr::group_by(park_unit, wsd_source_id) %>%
+    p90_values <- precipitation_change |>
+      dplyr::group_by(park_unit, wsd_source_id) |>
       dplyr::mutate(p90 = stats::quantile(percent_change, 0.90, na.rm = TRUE),
-             diff_from_p90 = abs(percent_change - p90)) %>%
-      dplyr::filter(diff_from_p90 == min(diff_from_p90, na.rm = TRUE)) %>%
-      dplyr::slice(1) %>%  # take first if ties
-      dplyr::ungroup() %>%
+             diff_from_p90 = abs(percent_change - p90)) |>
+      dplyr::filter(diff_from_p90 == min(diff_from_p90, na.rm = TRUE)) |>
+      dplyr::slice(1) |>  # take first if ties
+      dplyr::ungroup() |>
       dplyr::select(wsd_source_id,
              park_unit,
              raw_precipitation_change_p90 = percent_change)
     
     # calculate fraction of models showing decrease
-    model_fractions <- precipitation_change %>%
-      dplyr::group_by(park_unit, wsd_source_id) %>%
+    model_fractions <- precipitation_change |>
+      dplyr::group_by(park_unit, wsd_source_id) |>
       dplyr::summarize(raw_precip_models_showing_decrease = 100 * sum(percent_change < 0, na.rm = TRUE) / dplyr::n(),
                 .groups = "drop")
     
   })})
   
   # Combine all indicators using standardized joins
-  final_results <- p10_values %>%
-    dplyr::left_join(p50_values, by = c("wsd_source_id", "park_unit")) %>%
-    dplyr::left_join(p90_values, by = c("wsd_source_id", "park_unit")) %>%
-    dplyr::left_join(model_fractions, by = c("wsd_source_id", "park_unit")) %>%
+  final_results <- p10_values |>
+    dplyr::left_join(p50_values, by = c("wsd_source_id", "park_unit")) |>
+    dplyr::left_join(p90_values, by = c("wsd_source_id", "park_unit")) |>
+    dplyr::left_join(model_fractions, by = c("wsd_source_id", "park_unit")) |>
     # add standardized indicators using helper function
-    add_standardized_indicators("raw_precipitation_change", invert = TRUE) %>%
-    add_standardized_indicators("raw_precip_models_showing_decrease") %>%
+    add_standardized_indicators("raw_precipitation_change", invert = TRUE) |>
+    add_standardized_indicators("raw_precip_models_showing_decrease") |>
     # reorder columns following standardized pattern
     dplyr::select(wsd_source_id, park_unit, dplyr::everything())
   

@@ -131,15 +131,15 @@ calc_wet_period_sensitivity <- function(
 
   ws_ids <- unique(water_supplies$wsd_source_id)
 
-  historical_data <- period_ds %>%
-    dplyr::select(dplyr::all_of(required_cols)) %>%
+  historical_data <- period_ds |>
+    dplyr::select(dplyr::all_of(required_cols)) |>
     dplyr::filter(
       wsd_source_id %in% ws_ids,
       ssp == "historical",
       year >= hist_start_year,
       year <= hist_end_year
-    ) %>%
-    dplyr::collect() %>%
+    ) |>
+    dplyr::collect() |>
     dplyr::mutate(
       wet_spell_max_length = dplyr::if_else(
         is.finite(wet_spell_max_length),
@@ -152,14 +152,14 @@ calc_wet_period_sensitivity <- function(
     stop("No historical wet-period records remained after filtering.")
   }
 
-  model_trends <- historical_data %>%
-    dplyr::arrange(wsd_source_id, park_unit, model, run, year) %>%
-    dplyr::group_by(wsd_source_id, park_unit, model, run) %>%
+  model_trends <- historical_data |>
+    dplyr::arrange(wsd_source_id, park_unit, model, run, year) |>
+    dplyr::group_by(wsd_source_id, park_unit, model, run) |>
     dplyr::summarize(
       cwd_historical_mean = mean(wet_spell_max_length, na.rm = TRUE),
       data = list(dplyr::pick(year, wet_spell_max_length)),
       .groups = "drop"
-    ) %>%
+    ) |>
     dplyr::mutate(
       n_years = purrr::map_int(
         data,
@@ -194,8 +194,8 @@ calc_wet_period_sensitivity <- function(
         mk,
         ~ if (is.null(.x)) NA_real_ else .x$p.value
       )
-    ) %>%
-    dplyr::select(-data, -sen, -mk) %>%
+    ) |>
+    dplyr::select(-data, -sen, -mk) |>
     dplyr::filter(
       is.finite(cwd_slope),
       is.finite(cwd_percent_slope)
@@ -252,16 +252,16 @@ calc_wet_period_sensitivity <- function(
     by = .(wsd_source_id, park_unit)
   ]
 
-  final_results <- summary_dt %>%
+  final_results <- summary_dt |>
     # Decreasing historical CWD indicates greater sensitivity. Standardize
     # only percent slope so absolute days/year are not double-counted.
     add_standardized_indicators(
       "raw_cwd_percent_slope_p",
       invert = TRUE
-    ) %>%
+    ) |>
     add_standardized_indicators(
       "raw_cwd_trend_models_showing_decrease"
-    ) %>%
+    ) |>
     dplyr::select(wsd_source_id, park_unit, dplyr::everything())
 
   if (save) {

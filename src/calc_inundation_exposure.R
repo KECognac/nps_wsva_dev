@@ -103,19 +103,19 @@ calc_inundation_exposure <- function(ws_scenarios,
   if (verbose) start_time <- Sys.time()
 
   # Separate non-analysis sites (no SLR scenario info) — recombined at the end
-  ws_not_in_analysis <- ws_scenarios %>% dplyr::filter(is.na(proj_file))
-  ws_in_analysis     <- ws_scenarios %>% dplyr::filter(!is.na(proj_file))
+  ws_not_in_analysis <- ws_scenarios |> dplyr::filter(is.na(proj_file))
+  ws_in_analysis     <- ws_scenarios |> dplyr::filter(!is.na(proj_file))
 
-  ws_scenarios_mod <- ws_in_analysis %>%
-    dplyr::ungroup() %>% 
-    dplyr::distinct() %>%
-    dplyr::mutate(identity = paste0(wsd_source_id, "-", buffer_km)) %>%
+  ws_scenarios_mod <- ws_in_analysis |>
+    dplyr::ungroup() |> 
+    dplyr::distinct() |>
+    dplyr::mutate(identity = paste0(wsd_source_id, "-", buffer_km)) |>
     dplyr::select(c(park_unit, identity, wsd_source_id, buffer_km, inun_proj_mm,
              inun_region, inun_proj_closest_mm, depth_ft, depth_m, inun_surf_url,
              proj_file, ref_file, geom))
   
-  region_list <- ws_scenarios_mod %>% 
-    split(f = .$proj_file) 
+  region_list <- ws_scenarios_mod |> 
+    split(f = ws_scenarios_mod$proj_file) 
   
   if (verbose) {
     pb <- progress::progress_bar$new(
@@ -132,24 +132,24 @@ calc_inundation_exposure <- function(ws_scenarios,
     if (verbose) pb$tick()
     
     # tiles needed for this region 
-    locs_needed <- ws_scenarios_mod %>%
-      dplyr::filter(identity %in% region_sf$identity) %>%
-      dplyr::distinct(proj_file, ref_file) %>%
+    locs_needed <- ws_scenarios_mod |>
+      dplyr::filter(identity %in% region_sf$identity) |>
+      dplyr::distinct(proj_file, ref_file) |>
       dplyr::mutate(state = substr(proj_file, 1, 2))
     
     # identify IDs with overlapping inundation layers
-    overlap_ids <-  ws_scenarios_mod %>%
-      dplyr::filter(identity %in% region_sf$identity) %>%
-      dplyr::group_by(identity) %>%
-      dplyr::mutate(count = dplyr::n()) %>%
-      dplyr::filter(count > 1) %>%
-      dplyr::pull(identity) %>%
+    overlap_ids <-  ws_scenarios_mod |>
+      dplyr::filter(identity %in% region_sf$identity) |>
+      dplyr::group_by(identity) |>
+      dplyr::mutate(count = dplyr::n()) |>
+      dplyr::filter(count > 1) |>
+      dplyr::pull(identity) |>
       unique()
 
-    overlap_files <- ws_scenarios_mod %>%
-      dplyr::filter(identity %in% region_sf$identity) %>%
-      dplyr::group_by(identity) %>%
-      dplyr::mutate(count = dplyr::n()) %>%
+    overlap_files <- ws_scenarios_mod |>
+      dplyr::filter(identity %in% region_sf$identity) |>
+      dplyr::group_by(identity) |>
+      dplyr::mutate(count = dplyr::n()) |>
       dplyr::filter(count > 1)
 
     # build full paths to all tiles (using per-row state to avoid recycling mismatches)
@@ -161,10 +161,10 @@ calc_inundation_exposure <- function(ws_scenarios,
     
     # split buffer indices into batch (all sites contained within single inundation
     # layer) vs. one-by-one (those with overlapping inundation layers)
-    idx_batch <- region_sf %>% 
+    idx_batch <- region_sf |> 
       dplyr::filter(!identity %in% overlap_ids)
     
-    idx_one_by_one <- ws_scenarios_mod %>% 
+    idx_one_by_one <- ws_scenarios_mod |> 
       dplyr::filter(identity %in% overlap_ids)
     
     # BATCH: non-overlapping sites on a single tile.
@@ -216,10 +216,10 @@ calc_inundation_exposure <- function(ws_scenarios,
         centroid_list[[scenario]] <- !is.na(terra::extract(rast, batch_centroids)[, 2])
       }
 
-      batch_counts <- dplyr::bind_rows(counts_list) %>%
+      batch_counts <- dplyr::bind_rows(counts_list) |>
         tidyr::pivot_wider(names_from  = scenario,
                     values_from = c(total, flooded),
-                    names_glue  = "raw_{.value}_cells_{scenario}") %>%
+                    names_glue  = "raw_{.value}_cells_{scenario}") |>
         dplyr::mutate(inun_centroid_change = dplyr::case_when(
           !centroid_list[["ref"]] & !centroid_list[["proj"]] ~ "no_to_no",
           !centroid_list[["ref"]] &  centroid_list[["proj"]] ~ "no_to_yes",
@@ -242,8 +242,8 @@ calc_inundation_exposure <- function(ws_scenarios,
 
       for (i in seq_len(length(combos))) {
 
-        b <- idx_one_by_one %>%
-          dplyr::filter(identity == combos[i]) %>%
+        b <- idx_one_by_one |>
+          dplyr::filter(identity == combos[i]) |>
           dplyr::distinct(identity, .keep_all = TRUE)
 
         b_sf <- sf::st_as_sf(b)
@@ -253,8 +253,8 @@ calc_inundation_exposure <- function(ws_scenarios,
 
           tiles <- if (scenario == "ref") ref_tiles else proj_tiles
 
-          tiles_words <- overlap_files %>%
-            dplyr::filter(identity == b_sf$identity) %>%
+          tiles_words <- overlap_files |>
+            dplyr::filter(identity == b_sf$identity) |>
             dplyr::pull(if (scenario == "ref") ref_file else proj_file)
 
           tiles <- tiles[basename(tiles) %in% tiles_words]
@@ -362,18 +362,18 @@ calc_inundation_exposure <- function(ws_scenarios,
         )
       }
 
-      one_by_one_counts <- dplyr::bind_rows(one_by_one_list) %>%
+      one_by_one_counts <- dplyr::bind_rows(one_by_one_list) |>
         tidyr::pivot_wider(names_from = scenario,
                     values_from = c(total, flooded),
-                    names_glue = "raw_{.value}_cells_{scenario}") %>%
-        dplyr::mutate(raw_total_cells_ref = dplyr::if_else(is.na(raw_total_cells_ref), raw_total_cells_proj, raw_total_cells_ref)) %>%
+                    names_glue = "raw_{.value}_cells_{scenario}") |>
+        dplyr::mutate(raw_total_cells_ref = dplyr::if_else(is.na(raw_total_cells_ref), raw_total_cells_proj, raw_total_cells_ref)) |>
         dplyr::left_join(dplyr::bind_rows(centroid_obo_list), by = "identity")
     } else {
       one_by_one_counts <- dplyr::tibble()
     }
     
-    region_results <- dplyr::bind_rows(one_by_one_counts, batch_counts) %>%
-      dplyr::left_join(region_sf, by = c("buffer_km", "identity")) %>%
+    region_results <- dplyr::bind_rows(one_by_one_counts, batch_counts) |>
+      dplyr::left_join(region_sf, by = c("buffer_km", "identity")) |>
       dplyr::mutate(raw_coverage_pct_ref = dplyr::if_else(raw_total_cells_ref > 0,
                                             (raw_flooded_cells_ref / raw_total_cells_ref) * 100,
                                             NA_real_),
@@ -386,7 +386,7 @@ calc_inundation_exposure <- function(ws_scenarios,
                                      raw_coverage_pct_ref == 0 & raw_coverage_pct_proj > 0  ~ "no_to_some",
                                      raw_coverage_pct_ref > 0  & raw_coverage_pct_proj == 0 ~ "some_to_no",
                                      raw_coverage_pct_ref > 0  & raw_coverage_pct_proj > 0  ~ "some_to_some",
-                                     TRUE ~ NA_character_)) %>%
+                                     TRUE ~ NA_character_)) |>
       dplyr::select(identity, wsd_source_id, buffer_km,
              raw_total_cells_ref,    # Total raster cells intersecting polygon in reference scenario
              raw_flooded_cells_ref,  # Count of flooded cells in reference scenario
@@ -406,29 +406,29 @@ calc_inundation_exposure <- function(ws_scenarios,
   # Clean up final results
 
   # SLR metadata per water supply (distinct handles multi-region sites)
-  ws_geom_meta <- ws_in_analysis %>%
-    sf::st_drop_geometry() %>%
-    dplyr::select(wsd_source_id, inun_proj_mm, inun_proj_closest_mm, depth_ft) %>%
+  ws_geom_meta <- ws_in_analysis |>
+    sf::st_drop_geometry() |>
+    dplyr::select(wsd_source_id, inun_proj_mm, inun_proj_closest_mm, depth_ft) |>
     dplyr::distinct()
 
   # Processed coastal results with metadata
-  coastal_results <- ws_inun_stats %>%
-    dplyr::left_join(ws_geom_meta, by = "wsd_source_id") %>%
+  coastal_results <- ws_inun_stats |>
+    dplyr::left_join(ws_geom_meta, by = "wsd_source_id") |>
     dplyr::select(wsd_source_id, buffer_km,
            inun_proj_mm, inun_proj_closest_mm, depth_ft,
            raw_total_cells_ref, raw_flooded_cells_ref, raw_coverage_pct_ref,
            raw_total_cells_proj, raw_flooded_cells_proj, raw_coverage_pct_proj,
-           raw_cell_change, raw_pct_point_change, inun_change, inun_centroid_change) %>%
+           raw_cell_change, raw_pct_point_change, inun_change, inun_centroid_change) |>
     dplyr::mutate(dplyr::across(c(raw_total_cells_ref, raw_flooded_cells_ref, raw_coverage_pct_ref,
                     raw_total_cells_proj, raw_flooded_cells_proj, raw_coverage_pct_proj,
                     raw_cell_change, raw_pct_point_change),
-                  ~ ifelse(inun_change == "no_to_no", 0, .x))) %>%
+                  ~ ifelse(inun_change == "no_to_no", 0, .x))) |>
     dplyr::distinct()
 
   # All unique water supplies (base for expansion)
-  all_ws_base <- ws_scenarios %>%
-    sf::st_drop_geometry() %>%
-    dplyr::select(wsd_source_id, park_unit) %>%
+  all_ws_base <- ws_scenarios |>
+    sf::st_drop_geometry() |>
+    dplyr::select(wsd_source_id, park_unit) |>
     dplyr::distinct()
 
   # Water supplies >50 km from the coast get every indicator column set to NA.
@@ -444,8 +444,8 @@ calc_inundation_exposure <- function(ws_scenarios,
   # for genuinely in-range sites. Metadata columns (buffer_km, inun_proj_mm,
   # inun_proj_closest_mm, depth_ft) are left untouched; only the risk/indicator
   # columns are screened.
-  coast_distances_df <- readr::read_csv(coast_distances, show_col_types = FALSE) %>%
-    dplyr::select(wsd_source_id, coast_dist_m) %>%
+  coast_distances_df <- readr::read_csv(coast_distances, show_col_types = FALSE) |>
+    dplyr::select(wsd_source_id, coast_dist_m) |>
     dplyr::distinct()
 
   indicator_cols <- c(
@@ -456,17 +456,17 @@ calc_inundation_exposure <- function(ws_scenarios,
 
   # Expand to all water supplies; non-coastal rows get NA for all indicator columns.
   # group_by(buffer_km): non-coastal rows have buffer_km = NA → their own group;
-  final_results <- all_ws_base %>%
-    dplyr::left_join(coastal_results, by = "wsd_source_id") %>%
-    dplyr::left_join(coast_distances_df, by = "wsd_source_id") %>%
-    dplyr::mutate(dplyr::across(dplyr::all_of(indicator_cols), ~ replace(., is.na(coast_dist_m), NA))) %>%
-    dplyr::select(-coast_dist_m) %>%
-    dplyr::group_by(buffer_km) %>%
-    add_standardized_indicators("raw_coverage_pct_ref") %>%
-    add_standardized_indicators("raw_coverage_pct_proj") %>%
-    add_standardized_indicators("raw_cell_change") %>%
-    add_standardized_indicators("raw_pct_point_change") %>%
-    dplyr::ungroup() %>%
+  final_results <- all_ws_base |>
+    dplyr::left_join(coastal_results, by = "wsd_source_id") |>
+    dplyr::left_join(coast_distances_df, by = "wsd_source_id") |>
+    dplyr::mutate(dplyr::across(dplyr::all_of(indicator_cols), ~ replace(., is.na(coast_dist_m), NA))) |>
+    dplyr::select(-coast_dist_m) |>
+    dplyr::group_by(buffer_km) |>
+    add_standardized_indicators("raw_coverage_pct_ref") |>
+    add_standardized_indicators("raw_coverage_pct_proj") |>
+    add_standardized_indicators("raw_cell_change") |>
+    add_standardized_indicators("raw_pct_point_change") |>
+    dplyr::ungroup() |>
     dplyr::select(wsd_source_id, park_unit, buffer_km,
            inun_proj_mm, inun_proj_closest_mm, depth_ft,
            raw_coverage_pct_ref,  norm_coverage_pct_ref,  rank_coverage_pct_ref,

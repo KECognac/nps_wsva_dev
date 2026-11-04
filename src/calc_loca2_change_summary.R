@@ -316,12 +316,12 @@ calc_loca2_change_summary <- function(water_supplies,
       }
       
       # Push site and date filters into Arrow before collecting into memory.
-      raw <- dataset %>%
-        dplyr::select(dplyr::all_of(required_columns)) %>%
+      raw <- dataset |>
+        dplyr::select(dplyr::all_of(required_columns)) |>
         dplyr::filter(wsd_source_id %in% site_ids,
                       date >= as.character(input_start),
-                      date <= as.character(input_end)) %>%
-        dplyr::collect() %>%
+                      date <= as.character(input_end)) |>
+        dplyr::collect() |>
         data.table::as.data.table()
       
       if (!nrow(raw)) {

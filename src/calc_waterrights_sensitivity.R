@@ -132,9 +132,9 @@ calc_waterrights_sensitivity <- function(
   }
   
   # Sensitivity is the baseline period only — one row per water supply
-  results <- stress_data %>%
-    dplyr::filter(period == "baseline") %>%
-    dplyr::distinct(wsd_source_id, .keep_all = TRUE) %>%
+  results <- stress_data |>
+    dplyr::filter(period == "baseline") |>
+    dplyr::distinct(wsd_source_id, .keep_all = TRUE) |>
     dplyr::select(wsd_source_id, park_unit, park_name,
            raw_water_stress   = stress_score,
            water_stress_label = stress_label)
@@ -148,8 +148,8 @@ calc_waterrights_sensitivity <- function(
   }
 
   # invert = FALSE: higher water stress = higher sensitivity
-  final_results <- results %>%
-    add_standardized_indicators("raw_water_stress", invert = FALSE) %>%
+  final_results <- results |>
+    add_standardized_indicators("raw_water_stress", invert = FALSE) |>
     # reorder columns following standardized pattern
     dplyr::select(wsd_source_id, park_unit, park_name, dplyr::everything())
 

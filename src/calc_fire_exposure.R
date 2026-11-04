@@ -88,15 +88,15 @@ calc_fire_exposure <- function(water_supplies,
   
   # Calc percentiles and model agreement for all pyromes
   # Pull 10th, 50th and 90th percentile values for each pyrome
-  pyromes_selected <- fire_prob_data %>%
-    dplyr::group_by(PYROME) %>%
+  pyromes_selected <- fire_prob_data |>
+    dplyr::group_by(PYROME) |>
   dplyr::slice(c(
     which.min(abs(delta_fp - stats::quantile(delta_fp, 0.1))),
     which.min(abs(delta_fp - stats::quantile(delta_fp, 0.5))),
     which.min(abs(delta_fp - stats::quantile(delta_fp, 0.9)))
-  )) %>%
-  dplyr::mutate(percentile = c("p10", "p50", "p90")) %>%
-    dplyr::ungroup() %>%
+  )) |>
+  dplyr::mutate(percentile = c("p10", "p50", "p90")) |>
+    dplyr::ungroup() |>
     tidyr::pivot_wider(
       names_from = percentile,
       values_from = c(GCM, delta_fp),
@@ -104,8 +104,8 @@ calc_fire_exposure <- function(water_supplies,
     )
   
   # calculate fraction of models showing increase
-  model_fractions <- fire_prob_data %>%
-    dplyr::group_by(PYROME) %>%
+  model_fractions <- fire_prob_data |>
+    dplyr::group_by(PYROME) |>
     dplyr::summarize(
       fire_models_showing_increase = 100 * sum(delta_fp > 0, na.rm = TRUE) / dplyr::n(),
       .groups = "drop"
@@ -138,27 +138,27 @@ calc_fire_exposure <- function(water_supplies,
     }
     
     # Extract fire probability data for this pyrome
-    fp_data <- fire_prob_cleaned %>% 
-      dplyr::filter(PYROME %in% ws_pyrome$PYROME) %>%
+    fp_data <- fire_prob_cleaned |> 
+      dplyr::filter(PYROME %in% ws_pyrome$PYROME) |>
       dplyr::mutate(
         wsd_source_id = water_supplies[i, ]$wsd_source_id,
         park_unit = water_supplies[i, ]$park_unit,
         park_name = water_supplies[i, ]$park_name
-      ) %>%
+      ) |>
       dplyr::select(wsd_source_id, park_unit, park_name, dplyr::everything())
     
     return(fp_data)
   })
   
   # Calculate standardized indicators
-  final_results <- results %>%
+  final_results <- results |>
     # Raw values (renamed for consistency)
     dplyr::rename(
       raw_fire_prob_change_p10 = delta_fp_p10,
       raw_fire_prob_change_p50 = delta_fp_p50,
       raw_fire_prob_change_p90 = delta_fp_p90,
       raw_fire_models_showing_increase = fire_models_showing_increase
-    ) %>%
+    ) |>
     # Use helper function to add normalized and ranked columns
     add_standardized_indicators("raw_fire_prob_change")
   

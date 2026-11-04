@@ -87,7 +87,7 @@ process_groundwater_depth <- function(
   
   wtd <- terra::rast(wtd_path)
   
-  points_native <- water_supplies %>%
+  points_native <- water_supplies |>
     sf::st_transform(terra::crs(wtd, proj = TRUE))
   
   pts_vect <- terra::vect(points_native)
@@ -168,9 +168,9 @@ process_groundwater_depth <- function(
     future::plan(future::sequential)
   }
   
-  wtd_all_sites <- water_supplies %>%
-    sf::st_drop_geometry() %>%
-    dplyr::mutate(wtd_point_m = wtd_point_m) %>%
+  wtd_all_sites <- water_supplies |>
+    sf::st_drop_geometry() |>
+    dplyr::mutate(wtd_point_m = wtd_point_m) |>
     dplyr::select(wsd_source_id, park_unit, park_name, wtd_point_m)
   
   if (save) {

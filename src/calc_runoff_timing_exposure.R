@@ -144,11 +144,11 @@ calc_runoff_timing_exposure <- function(water_supplies,
   angle_lookup    <- 2 * pi * dowy_lookup / 365
   
   if (hindcast == FALSE) {
-    files <- list.files(runoff_data, full.names = TRUE) %>%
-      grep("2015-2100|training", ., value = TRUE)
+    files <- list.files(runoff_data, full.names = TRUE) |>
+      grep("2015-2100|training", x = _, value = TRUE)
   } else {
-    files <- list.files(runoff_data, full.names = TRUE) %>%
-      grep("training", ., invert = TRUE, value = TRUE)
+    files <- list.files(runoff_data, full.names = TRUE) |>
+      grep("training", x = _, invert = TRUE, value = TRUE)
   }
   if (length(files) == 0) stop("No processed files found. Check input data and paths.")
   
@@ -160,7 +160,7 @@ calc_runoff_timing_exposure <- function(water_supplies,
   }
   
   process_raw_grid_data <- function(f) {
-    raw <- arrow::read_parquet(f) %>%
+    raw <- arrow::read_parquet(f) |>
       dplyr::filter(wsd_source_id %in% water_supplies$wsd_source_id)
     
     # monthly total per grid cell, then average across grid-cell neighborhood
@@ -238,8 +238,8 @@ calc_runoff_timing_exposure <- function(water_supplies,
   # Circular mean CT over years. Averaging annual x/y components gives each
   # water year equal influence.
   summarize_ct <- function(df) {
-    df %>%
-      dplyr::group_by(wsd_source_id, park_unit) %>%
+    df |>
+      dplyr::group_by(wsd_source_id, park_unit) |>
       dplyr::summarize(timing_x = mean(timing_x, na.rm = TRUE),
                        timing_y = mean(timing_y, na.rm = TRUE),
                        timing_angle = atan2(timing_y, timing_x) %% (2 * pi),
@@ -248,33 +248,33 @@ calc_runoff_timing_exposure <- function(water_supplies,
   }
   
   if (hindcast == TRUE) {
-    ssps <- combined_data %>% dplyr::filter(ssp != "historical") %>%
+    ssps <- combined_data |> dplyr::filter(ssp != "historical") |>
       dplyr::distinct(model, ssp, run)
     runoff_change_sub <- vector("list", nrow(ssps))
     
     for (i in seq_len(nrow(ssps))) {
       ssp_sub <- ssps[i, ]
-      hist_hc <- combined_data %>%
+      hist_hc <- combined_data |>
         dplyr::filter(model == ssp_sub$model, ssp == "historical", run == ssp_sub$run,
                       year >= hist_start_year, year <= hist_end_year)
-      fut_fill <- combined_data %>%
+      fut_fill <- combined_data |>
         dplyr::filter(model == ssp_sub$model, ssp == ssp_sub$ssp, run == ssp_sub$run,
                       year >= hist_start_year, year <= hist_end_year,
                       !year %in% hist_hc$year)
-      historical_summary <- summarize_ct(dplyr::bind_rows(hist_hc, fut_fill)) %>%
+      historical_summary <- summarize_ct(dplyr::bind_rows(hist_hc, fut_fill)) |>
         dplyr::rename(timing_angle_historical = timing_angle,
-                      range_historical = range) %>%
+                      range_historical = range) |>
         dplyr::select(-timing_x, -timing_y)
-      future_summary <- combined_data %>%
+      future_summary <- combined_data |>
         dplyr::filter(model == ssp_sub$model, ssp == ssp_sub$ssp, run == ssp_sub$run,
-                      year >= future_start_year, year <= future_end_year) %>%
-        summarize_ct() %>%
+                      year >= future_start_year, year <= future_end_year) |>
+        summarize_ct() |>
         dplyr::rename(timing_angle_future = timing_angle,
-                      range_future = range) %>%
+                      range_future = range) |>
         dplyr::select(-timing_x, -timing_y)
       
-      runoff_change_sub[[i]] <- future_summary %>%
-        dplyr::inner_join(historical_summary, by = c("wsd_source_id", "park_unit")) %>%
+      runoff_change_sub[[i]] <- future_summary |>
+        dplyr::inner_join(historical_summary, by = c("wsd_source_id", "park_unit")) |>
         dplyr::mutate(model = ssp_sub$model, ssp = ssp_sub$ssp, run = ssp_sub$run,
                       timing_change = atan2(sin(timing_angle_future - timing_angle_historical),
                                             cos(timing_angle_future - timing_angle_historical)) * 365 / (2 * pi),
@@ -283,33 +283,33 @@ calc_runoff_timing_exposure <- function(water_supplies,
     runoff_change <- dplyr::bind_rows(runoff_change_sub)
     
   } else {
-    ssps <- combined_data %>% dplyr::filter(ssp != "training") %>%
+    ssps <- combined_data |> dplyr::filter(ssp != "training") |>
       dplyr::distinct(model, ssp, run)
-    training_hist <- combined_data %>%
+    training_hist <- combined_data |>
       dplyr::filter(ssp == "training", year >= hist_start_year, year <= hist_end_year)
     runoff_change_sub <- vector("list", nrow(ssps))
     
     for (i in seq_len(nrow(ssps))) {
       suppressMessages(suppressWarnings({
         ssp_sub <- ssps[i, ]
-        model_hist <- combined_data %>%
+        model_hist <- combined_data |>
           dplyr::filter(model == ssp_sub$model, ssp == ssp_sub$ssp, run == ssp_sub$run,
                         year >= hist_start_year, year <= hist_end_year,
                         !year %in% training_hist$year)
-        historical_summary <- summarize_ct(dplyr::bind_rows(training_hist, model_hist)) %>%
+        historical_summary <- summarize_ct(dplyr::bind_rows(training_hist, model_hist)) |>
           dplyr::rename(timing_angle_historical = timing_angle,
-                        range_historical = range) %>%
+                        range_historical = range) |>
           dplyr::select(-timing_x, -timing_y)
-        future_summary <- combined_data %>%
+        future_summary <- combined_data |>
           dplyr::filter(model == ssp_sub$model, ssp == ssp_sub$ssp, run == ssp_sub$run,
-                        year >= future_start_year, year <= future_end_year) %>%
-          summarize_ct() %>%
+                        year >= future_start_year, year <= future_end_year) |>
+          summarize_ct() |>
           dplyr::rename(timing_angle_future = timing_angle,
-                        range_future = range) %>%
+                        range_future = range) |>
           dplyr::select(-timing_x, -timing_y)
         
-        runoff_change_sub[[i]] <- future_summary %>%
-          dplyr::inner_join(historical_summary, by = c("wsd_source_id", "park_unit")) %>%
+        runoff_change_sub[[i]] <- future_summary |>
+          dplyr::inner_join(historical_summary, by = c("wsd_source_id", "park_unit")) |>
           dplyr::mutate(model = ssp_sub$model, ssp = ssp_sub$ssp, run = ssp_sub$run,
                         timing_change = atan2(sin(timing_angle_future - timing_angle_historical),
                                               cos(timing_angle_future - timing_angle_historical)) * 365 / (2 * pi),
@@ -330,8 +330,8 @@ calc_runoff_timing_exposure <- function(water_supplies,
     # then choose the direction supported by more models.
     # For an exact 50/50 split, choose the direction with the larger absolute
     # tail change (p10 earlier versus p90 later). Agreement remains 0.5.
-    timing_summary <- runoff_change %>%
-      dplyr::group_by(park_unit, wsd_source_id) %>%
+    timing_summary <- runoff_change |>
+      dplyr::group_by(park_unit, wsd_source_id) |>
       dplyr::summarize(n_valid = sum(!is.na(timing_change)),
                        n_earlier = sum(timing_change < 0, na.rm = TRUE),
                        n_later = sum(timing_change > 0, na.rm = TRUE),
@@ -349,7 +349,7 @@ calc_runoff_timing_exposure <- function(water_supplies,
                        raw_runoff_timing_direction_agreement_fraction = dplyr::if_else(n_valid > 0,
                                                                                        max(n_earlier, n_later) / n_valid,
                                                                                        NA_real_),
-                       .groups = "drop") %>%
+                       .groups = "drop") |>
       dplyr::select(-c(n_valid,
                        n_earlier,
                        n_later,
@@ -361,46 +361,46 @@ calc_runoff_timing_exposure <- function(water_supplies,
     # absolute timing change, select the actual realization nearest the p90,
     # retain its earlier/later direction, and calculate the fraction of valid
     # model realizations projecting that same direction.
-    alt_timing_summary <- runoff_change %>%
-      dplyr::filter(!is.na(timing_change)) %>%
-      dplyr::group_by(park_unit, wsd_source_id) %>%
+    alt_timing_summary <- runoff_change |>
+      dplyr::filter(!is.na(timing_change)) |>
+      dplyr::group_by(park_unit, wsd_source_id) |>
       dplyr::mutate(abs_timing_change = abs(timing_change),
                     alt_timing_p90 = stats::quantile(abs_timing_change, 0.90, na.rm = TRUE),
-                    diff_from_alt_timing_p90 = abs(abs_timing_change - alt_timing_p90)) %>%
-      dplyr::filter(diff_from_alt_timing_p90 == min(diff_from_alt_timing_p90, na.rm = TRUE)) %>%
-      dplyr::slice(1) %>%
+                    diff_from_alt_timing_p90 = abs(abs_timing_change - alt_timing_p90)) |>
+      dplyr::filter(diff_from_alt_timing_p90 == min(diff_from_alt_timing_p90, na.rm = TRUE)) |>
+      dplyr::slice(1) |>
       dplyr::mutate(runoff_alt_timing_change_direction = dplyr::case_when(
         timing_change < 0 ~ "earlier",
         timing_change > 0 ~ "later",
         TRUE ~ "no change"),
-        raw_runoff_alt_timing_change_magnitude = abs_timing_change) %>%
+        raw_runoff_alt_timing_change_magnitude = abs_timing_change) |>
       dplyr::select(wsd_source_id,
                     park_unit,
                     runoff_alt_timing_change_direction,
-                    raw_runoff_alt_timing_change_magnitude) %>%
-      dplyr::left_join(runoff_change %>%
-                         dplyr::filter(!is.na(timing_change)) %>%
-                         dplyr::group_by(park_unit, wsd_source_id) %>%
+                    raw_runoff_alt_timing_change_magnitude) |>
+      dplyr::left_join(runoff_change |>
+                         dplyr::filter(!is.na(timing_change)) |>
+                         dplyr::group_by(park_unit, wsd_source_id) |>
                          dplyr::summarize(n_valid = dplyr::n(),
                                           n_earlier = sum(timing_change < 0, na.rm = TRUE),
                                           n_later = sum(timing_change > 0, na.rm = TRUE),
                                           n_no_change = sum(timing_change == 0, na.rm = TRUE),
                                           .groups = "drop"),
-                       by = c("wsd_source_id", "park_unit")) %>%
+                       by = c("wsd_source_id", "park_unit")) |>
       dplyr::mutate(raw_runoff_alt_timing_direction_agreement_fraction = dplyr::case_when(
         runoff_alt_timing_change_direction == "earlier" ~ n_earlier / n_valid,
         runoff_alt_timing_change_direction == "later" ~ n_later / n_valid,
         runoff_alt_timing_change_direction == "no change" ~ n_no_change / n_valid,
-        TRUE ~ NA_real_)) %>%
+        TRUE ~ NA_real_)) |>
       dplyr::select(-n_valid, -n_earlier, -n_later, -n_no_change)
   }))
   
-  final_results <- timing_summary %>%
-    dplyr::left_join(alt_timing_summary, by = c("wsd_source_id", "park_unit")) %>%
+  final_results <- timing_summary |>
+    dplyr::left_join(alt_timing_summary, by = c("wsd_source_id", "park_unit")) |>
     # Original timing exposure indicator
-    add_standardized_indicators("raw_runoff_timing_change_magnitude", invert = FALSE) %>%
+    add_standardized_indicators("raw_runoff_timing_change_magnitude", invert = FALSE) |>
     # Alternative p90 absolute-magnitude timing exposure indicator
-    add_standardized_indicators("raw_runoff_alt_timing_change_magnitude", invert = FALSE) %>%
+    add_standardized_indicators("raw_runoff_alt_timing_change_magnitude", invert = FALSE) |>
     dplyr::select(wsd_source_id, park_unit, dplyr::everything())
   
   if (save) {

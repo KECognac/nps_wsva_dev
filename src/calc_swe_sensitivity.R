@@ -104,7 +104,7 @@ calc_swe_sensitivity <- function(water_supplies,
   }
   
   process_raw_grid_data <- function(f) {
-    raw <- arrow::read_parquet(f) %>%
+    raw <- arrow::read_parquet(f) |>
       dplyr::filter(wsd_source_id %in% water_supplies$wsd_source_id)
     
     data.table::as.data.table(raw)[
@@ -138,20 +138,20 @@ calc_swe_sensitivity <- function(water_supplies,
   annual_data <- purrr::map(files, ~{
     if (verbose) pb$tick()
     process_raw_grid_data(.x)
-  }) %>%
-    dplyr::bind_rows() %>%
+  }) |>
+    dplyr::bind_rows() |>
     dplyr::select(wsd_source_id, park_unit, year, max_swe)
   
   if (nrow(annual_data) == 0) {
     stop("No historical SWE records found after filtering.")
   }
   
-  final_results <- annual_data %>%
-    dplyr::arrange(wsd_source_id, year) %>%
-    dplyr::group_by(wsd_source_id, park_unit) %>%
+  final_results <- annual_data |>
+    dplyr::arrange(wsd_source_id, year) |>
+    dplyr::group_by(wsd_source_id, park_unit) |>
     dplyr::summarize(raw_avg_swe = mean(max_swe, na.rm = TRUE),
                      data = list(dplyr::pick(dplyr::everything())),
-                     .groups = "drop") %>%
+                     .groups = "drop") |>
     dplyr::mutate(n_years = purrr::map_int(data, ~ sum(!is.na(.x$max_swe))),
            sen = purrr::map(data, ~ {
              x <- .x$max_swe
@@ -164,19 +164,19 @@ calc_swe_sensitivity <- function(water_supplies,
            raw_slope_swe = purrr::map_dbl(sen, ~ if (is.null(.x)) NA_real_ else .x$estimates[[1]]),
            mk_tau = purrr::map_dbl(mk, ~ if (is.null(.x)) NA_real_ else .x$estimates[[1]]),
            mk_p_value = purrr::map_dbl(mk, ~ if (is.null(.x)) NA_real_ else .x$p.value),
-           mk_significant = mk_p_value < 0.05) %>%
-    dplyr::select(-data, -sen, -mk, -mk_p_value, -mk_tau) %>%
+           mk_significant = mk_p_value < 0.05) |>
+    dplyr::select(-data, -sen, -mk, -mk_p_value, -mk_tau) |>
     dplyr::mutate(trend_direction = dplyr::case_when(is.na(raw_slope_swe) ~ "no trend",
                                        raw_slope_swe > 0 ~ "increasing",
                                        raw_slope_swe < 0 ~ "decreasing",
            TRUE ~ "no change"),
            raw_percent_slope_swe = ifelse(is.na(raw_slope_swe) | is.na(raw_avg_swe) | raw_avg_swe == 0,
                                           NA_real_,
-                                          (raw_slope_swe / raw_avg_swe) * 100)) %>%
+                                          (raw_slope_swe / raw_avg_swe) * 100)) |>
     # add standardized indicators using helper function
-    add_standardized_indicators("raw_slope_swe", invert = TRUE) %>%
-    add_standardized_indicators("raw_avg_swe", invert = TRUE) %>%
-    add_standardized_indicators("raw_percent_slope_swe", invert = TRUE) %>%
+    add_standardized_indicators("raw_slope_swe", invert = TRUE) |>
+    add_standardized_indicators("raw_avg_swe", invert = TRUE) |>
+    add_standardized_indicators("raw_percent_slope_swe", invert = TRUE) |>
     # reorder columns following standardized pattern
     dplyr::select(wsd_source_id, park_unit, dplyr::everything())
   

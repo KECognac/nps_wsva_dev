@@ -37,25 +37,25 @@ calc_nearby_use_exposure_old <- function(water_supplies,
     counties <- st_transform(counties, st_crs(water_supplies))
     counties$county_area_km2 <- as.numeric(st_area(st_transform(counties, 5070))) / 1e6
     
-    points_with_counties <- st_join(water_supplies, counties, join = st_nearest_feature) %>%
-      mutate(fips = as.numeric(paste0(STATEFP, COUNTYFP))) %>%
+    points_with_counties <- st_join(water_supplies, counties, join = st_nearest_feature) |>
+      mutate(fips = as.numeric(paste0(STATEFP, COUNTYFP))) |>
       select(park_unit, park_name, wsd_source_id, fips, county_area_km2)
     
     # aq = aquaculture; dp = domestic; ic = industrial + mining; ir = irrigated agriculture; ls = livestock; th = thermoelectric
-    use_future <- future_use %>%
-      mutate(fips = as.numeric(fips)) %>%
+    use_future <- future_use |>
+      mutate(fips = as.numeric(fips)) |>
       filter(fips %in% unique(points_with_counties$fips),
-             (yearr >= 2035 & yearr <= 2065)) %>%
-      rename(year = yearr) %>%
-      group_by(fips, year, scenario) %>%
-      summarize(total_withdrawal = sum(withdrawal, na.rm = TRUE)) %>%
+             (yearr >= 2035 & yearr <= 2065)) |>
+      rename(year = yearr) |>
+      group_by(fips, year, scenario) |>
+      summarize(total_withdrawal = sum(withdrawal, na.rm = TRUE)) |>
       # per county and scenario, grab mean annual withdrawal from 2035-2065
-      group_by(fips, scenario) %>%
-      summarize(future_withdrawal = mean(total_withdrawal, na.rm = TRUE)) %>%
+      group_by(fips, scenario) |>
+      summarize(future_withdrawal = mean(total_withdrawal, na.rm = TRUE)) |>
       mutate(future_withdrawal = ifelse(future_withdrawal == "NaN", 0, future_withdrawal))
     
     #1985-2015 observed data:
-    use_historic <- observed_use %>%
+    use_historic <- observed_use |>
       select(year, state_name, county_nm, fips = FIPS, PStot,
              aq = AquaSelfTot,
              dp = DomTot,
@@ -63,27 +63,27 @@ calc_nearby_use_exposure_old <- function(water_supplies,
              ir = IrrigSelfTot,
              ls = StockSelfTot,
              th = ThermSelfTot,
-             min = MinSelfTot) %>%
+             min = MinSelfTot) |>
       mutate(across(c(aq, dp, ic, ir, ls, th, min), ~as.numeric(na_if(as.character(.x), "-"))),
              ic = ic + min,
-             fips = as.numeric(fips)) %>%
-      select(-min) %>%
+             fips = as.numeric(fips)) |>
+      select(-min) |>
       # subset to only counties with water supplies
-      filter(fips %in% unique(points_with_counties$fips)) %>%
-      pivot_longer(c(aq, dp, ic, ir, ls, th), names_to = "sector", values_to = "withdrawal") %>%
-      group_by(state_name, county_nm, fips, year) %>%
-      summarize(total_withdrawal = sum(withdrawal, na.rm = TRUE)) %>%
-      group_by(fips) %>%
+      filter(fips %in% unique(points_with_counties$fips)) |>
+      pivot_longer(c(aq, dp, ic, ir, ls, th), names_to = "sector", values_to = "withdrawal") |>
+      group_by(state_name, county_nm, fips, year) |>
+      summarize(total_withdrawal = sum(withdrawal, na.rm = TRUE)) |>
+      group_by(fips) |>
       # get avg. total use across 1985-2015
-      summarize(historic_withdrawal = mean(total_withdrawal, na.rm = TRUE)) %>%
+      summarize(historic_withdrawal = mean(total_withdrawal, na.rm = TRUE)) |>
       mutate(historic_withdrawal = ifelse(historic_withdrawal == "NaN", 0, historic_withdrawal))
     
-    use_change <- use_future %>%
-      inner_join(., use_historic, by = c("fips")) %>%
-      left_join(points_with_counties %>%
+    use_change <- use_future |>
+      inner_join(use_historic, by = c("fips")) |>
+      left_join(points_with_counties |>
                   distinct(fips, county_area_km2),
-                by = "fips") %>%
-      select(fips, scenario, future_withdrawal, historic_withdrawal, county_area_km2) %>%
+                by = "fips") |>
+      select(fips, scenario, future_withdrawal, historic_withdrawal, county_area_km2) |>
       mutate(absolute_change_mgd = future_withdrawal - historic_withdrawal,
              use_change = absolute_change_mgd / county_area_km2,
              percent_change = if_else(historic_withdrawal > 0,
@@ -91,64 +91,64 @@ calc_nearby_use_exposure_old <- function(water_supplies,
                                       NA_real_),
              selection_change = if_else(is.finite(percent_change), percent_change, use_change))
     
-    p10_values <- use_change %>%
-      group_by(fips) %>%
+    p10_values <- use_change |>
+      group_by(fips) |>
       mutate(p10 = quantile(selection_change, 0.10, na.rm = TRUE),
-             diff_from_p10 = abs(selection_change - p10)) %>%
-      filter(diff_from_p10 == min(diff_from_p10, na.rm = TRUE)) %>%
-      slice(1) %>%  # take first if ties
-      ungroup() %>%
+             diff_from_p10 = abs(selection_change - p10)) |>
+      filter(diff_from_p10 == min(diff_from_p10, na.rm = TRUE)) |>
+      slice(1) |>  # take first if ties
+      ungroup() |>
       select(fips,
              raw_use_change_p10 = percent_change,
              raw_absolute_use_change_p10 = use_change)
     
-    p50_values <- use_change %>%
-      group_by(fips) %>%
+    p50_values <- use_change |>
+      group_by(fips) |>
       mutate(p50 = median(selection_change, na.rm = TRUE),
-             diff_from_p50 = abs(selection_change - p50)) %>%
-      filter(diff_from_p50 == min(diff_from_p50, na.rm = TRUE)) %>%
-      slice(1) %>%  # take first if ties
-      ungroup() %>%
+             diff_from_p50 = abs(selection_change - p50)) |>
+      filter(diff_from_p50 == min(diff_from_p50, na.rm = TRUE)) |>
+      slice(1) |>  # take first if ties
+      ungroup() |>
       select(fips,
              raw_use_change_p50 = percent_change,
              raw_absolute_use_change_p50 = use_change)
     
-    p90_values <- use_change %>%
-      group_by(fips) %>%
+    p90_values <- use_change |>
+      group_by(fips) |>
       mutate(p90 = quantile(selection_change, 0.90, na.rm = TRUE),
-             diff_from_p90 = abs(selection_change - p90)) %>%
-      filter(diff_from_p90 == min(diff_from_p90, na.rm = TRUE)) %>%
-      slice(1) %>%  # take first if ties
-      ungroup() %>%
+             diff_from_p90 = abs(selection_change - p90)) |>
+      filter(diff_from_p90 == min(diff_from_p90, na.rm = TRUE)) |>
+      slice(1) |>  # take first if ties
+      ungroup() |>
       select(fips,
              raw_use_change_p90 = percent_change,
              raw_absolute_use_change_p90 = use_change)
     
     # calculate fraction of models showing increase in use
-    model_fractions <- use_change %>%
-      group_by(fips) %>%
-      summarize(raw_models_showing_increase_pct = 100 * sum(use_change > 0, na.rm = TRUE) / n()) %>%
+    model_fractions <- use_change |>
+      group_by(fips) |>
+      summarize(raw_models_showing_increase_pct = 100 * sum(use_change > 0, na.rm = TRUE) / n()) |>
       ungroup()
     
     # Combine all indicators using standardized joins
-    final_results <- p10_values %>%
-      left_join(p50_values, by = c("fips")) %>%
-      left_join(p90_values, by = c("fips")) %>%
-      left_join(model_fractions, by = c("fips")) %>%
-      right_join(., points_with_counties, by = "fips") %>%
+    final_results <- p10_values |>
+      left_join(p50_values, by = c("fips")) |>
+      left_join(p90_values, by = c("fips")) |>
+      left_join(model_fractions, by = c("fips")) |>
+      right_join(points_with_counties, by = "fips") |>
       # add standardized indicators across water supplies using helper function
-      add_standardized_indicators("raw_use_change", invert = FALSE) %>%
-      add_standardized_indicators("raw_absolute_use_change", invert = FALSE) %>%
-      add_standardized_indicators("raw_models_showing_increase") %>%
+      add_standardized_indicators("raw_use_change", invert = FALSE) |>
+      add_standardized_indicators("raw_absolute_use_change", invert = FALSE) |>
+      add_standardized_indicators("raw_models_showing_increase") |>
       # reorder columns following standardized pattern
       select(wsd_source_id, park_unit, park_name, everything())
     
     # Something weird is going on with some of the FIPS codes... 
     # some RPA ones don't match up with the tigris FIPS. perhaps they've
     # changed?
-    # missing <- final_results %>%
-    #   filter(is.na(raw_use_change_p10)) %>%
-    #   st_as_sf() %>%
+    # missing <- final_results |>
+    #   filter(is.na(raw_use_change_p10)) |>
+    #   st_as_sf() |>
     #   st_join(., counties)
     
   })})

@@ -111,11 +111,11 @@ process_coastal_geometry <- function(water_supplies,
   nearest_idx <- sf::st_nearest_feature(ws_proj, cusp_proj)
   dist_to_nearest <- sf::st_distance(ws_proj, cusp_proj[nearest_idx, ], by_element = TRUE)
   
-  coast_distances <- ws_proj %>%
+  coast_distances <- ws_proj |>
     dplyr::mutate(
       dist_to_nearest = as.numeric(dist_to_nearest),
       coast_dist_m    = dplyr::if_else(dist_to_nearest > max_coast_dist_m, NA_real_, dist_to_nearest)
-    ) %>%
+    ) |>
     dplyr::select(wsd_source_id, park_unit, park_name, coast_dist_m) 
   
   # Grab relevant coastal water supply sites' elevations
@@ -132,13 +132,13 @@ process_coastal_geometry <- function(water_supplies,
     units = "meters",
     ncpu = ncpu,
     serial = FALSE
-  ) %>%
-    sf::st_drop_geometry() %>%
+  ) |>
+    sf::st_drop_geometry() |>
     dplyr::select(wsd_source_id, park_unit, park_name, 
                   coast_elev_m = elevation)
   
   coast_geometries <- dplyr::left_join(coast_distances, coast_elevations,
-                                by = c("wsd_source_id", "park_unit", "park_name")) %>%
+                                by = c("wsd_source_id", "park_unit", "park_name")) |>
     sf::st_drop_geometry()
   
   if (save) {

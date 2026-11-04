@@ -58,12 +58,12 @@ process_swi_data <- function(
   stopifnot("output_data.txt not found \u2014 check data_path" = file.exists(data_path),
             "save is TRUE but output_dir not provided"    = !save || !is.null(output_dir))
 
-  swi_pts <- utils::read.table(data_path, header = TRUE, sep = " ") %>%
-    dplyr::as_tibble() %>%
-    dplyr::rename(watershed_id = WatershedID) %>%
+  swi_pts <- utils::read.table(data_path, header = TRUE, sep = " ") |>
+    dplyr::as_tibble() |>
+    dplyr::rename(watershed_id = WatershedID) |>
     # Case_C: meters of inland SWI migration by 2100 (combined recharge + SLR)
-    dplyr::select(watershed_id, lat, lon, Case_C) %>%
-    dplyr::filter(lon >= -125, lon <= -66, lat >= 24, lat <= 50) %>%
+    dplyr::select(watershed_id, lat, lon, Case_C) |>
+    dplyr::filter(lon >= -125, lon <= -66, lat >= 24, lat <= 50) |>
     sf::st_as_sf(coords = c("lon", "lat"), crs = 4326, remove = FALSE)
 
   if (save) {

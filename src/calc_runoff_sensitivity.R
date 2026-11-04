@@ -104,7 +104,7 @@ calc_runoff_sensitivity <- function(water_supplies,
   }
   
   process_raw_grid_data <- function(f) {
-    raw <- arrow::read_parquet(f) %>%
+    raw <- arrow::read_parquet(f) |>
       dplyr::filter(wsd_source_id %in% water_supplies$wsd_source_id)
   
     data.table::as.data.table(raw)[
@@ -135,21 +135,21 @@ calc_runoff_sensitivity <- function(water_supplies,
   annual_data <- purrr::map(files, ~{
     if (verbose) pb$tick()
     process_raw_grid_data(.x)
-  }) %>%
-    dplyr::bind_rows() %>%
-    dplyr::group_by(wsd_source_id, park_unit, year) %>%
+  }) |>
+    dplyr::bind_rows() |>
+    dplyr::group_by(wsd_source_id, park_unit, year) |>
     dplyr::summarize(total_runoff = mean(total_runoff, na.rm = TRUE), .groups = "drop")
   
   if (nrow(annual_data) == 0) {
     stop("No historical runoff records found after filtering.")
   }
   
-  final_results <- annual_data %>%
-    dplyr::arrange(wsd_source_id, year) %>%
-    dplyr::group_by(wsd_source_id, park_unit) %>%
+  final_results <- annual_data |>
+    dplyr::arrange(wsd_source_id, year) |>
+    dplyr::group_by(wsd_source_id, park_unit) |>
     dplyr::summarize(raw_avg_runoff = mean(total_runoff, na.rm = TRUE),
                      data = list(dplyr::pick(dplyr::everything())),
-                     .groups = "drop") %>%
+                     .groups = "drop") |>
     dplyr::mutate(n_years = purrr::map_int(data, ~ sum(!is.na(.x$total_runoff))),
            sen = purrr::map(data, ~ {
              x <- .x$total_runoff
@@ -162,19 +162,19 @@ calc_runoff_sensitivity <- function(water_supplies,
            raw_slope_runoff = purrr::map_dbl(sen, ~ if (is.null(.x)) NA_real_ else .x$estimates[[1]]),
            mk_tau = purrr::map_dbl(mk, ~ if (is.null(.x)) NA_real_ else .x$estimates[[1]]),
            mk_p_value = purrr::map_dbl(mk, ~ if (is.null(.x)) NA_real_ else .x$p.value),
-           mk_significant = mk_p_value < 0.05) %>%
-    dplyr::select(-data, -sen, -mk, -mk_p_value, -mk_tau) %>%
+           mk_significant = mk_p_value < 0.05) |>
+    dplyr::select(-data, -sen, -mk, -mk_p_value, -mk_tau) |>
     dplyr::mutate(trend_direction = dplyr::case_when(is.na(raw_slope_runoff) ~ NA_character_,
                                        raw_slope_runoff > 0 ~ "increasing",
                                        raw_slope_runoff < 0 ~ "decreasing",
                                        TRUE ~ "no change"),
            raw_percent_slope_runoff = ifelse(is.na(raw_slope_runoff) | is.na(raw_avg_runoff) | raw_avg_runoff == 0,
                                              NA_real_,
-                                             (raw_slope_runoff / raw_avg_runoff) * 100)) %>%
+                                             (raw_slope_runoff / raw_avg_runoff) * 100)) |>
     # add standardized indicators using helper function
-    add_standardized_indicators("raw_slope_runoff", invert = TRUE) %>%
-    add_standardized_indicators("raw_avg_runoff", invert = TRUE) %>%
-    add_standardized_indicators("raw_percent_slope_runoff", invert = TRUE) %>%
+    add_standardized_indicators("raw_slope_runoff", invert = TRUE) |>
+    add_standardized_indicators("raw_avg_runoff", invert = TRUE) |>
+    add_standardized_indicators("raw_percent_slope_runoff", invert = TRUE) |>
     # reorder columns following standardized pattern
     dplyr::select(wsd_source_id, park_unit, dplyr::everything())
   

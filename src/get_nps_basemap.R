@@ -33,8 +33,8 @@ get_nps_basemap <- function(aoi, style = "standard", buffer_km = 2, zoom = NULL)
 
   # Tiles come back in the CRS of `area`; Web Mercator is their native CRS, so
   # no resampling, and it matches coord_sf(crs = 3857) in the plot.
-  area <- sf::st_buffer(sf::st_union(sf::st_transform(aoi, 4326)), buffer_km * 1000) %>%
-    sf::st_transform(3857) %>%
+  area <- sf::st_buffer(sf::st_union(sf::st_transform(aoi, 4326)), buffer_km * 1000) |>
+    sf::st_transform(3857) |>
     sf::st_as_sf()
 
   if (is.null(zoom)) {
@@ -103,7 +103,7 @@ add_nps_basemaps <- function(m, styles = c("standard", "light", "slate", "imager
 
   # Show only the first style at start so the others don't load until picked.
   lm <- leaflet::addLayersControl(lm, baseGroups = group_names, overlayGroups = overlays,
-                                  options = leaflet::layersControlOptions(collapsed = TRUE)) %>%
+                                  options = leaflet::layersControlOptions(collapsed = TRUE)) |>
     leaflet::hideGroup(group_names[-1])
 
   if (inherits(m, "mapview")) {

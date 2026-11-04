@@ -140,29 +140,29 @@ process_waterrightsindicator_data <- function(
                  "Commonwealth of the Northern Mariana Islands")
 
   conus_states <- hush(
-    tigris::states(progress_bar = FALSE) %>%
-      sf::st_transform(4326) %>%
-      dplyr::select(STATEFP, GEOID, STUSPS, NAME) %>%
-      dplyr::rename(state_name = NAME) %>%
+    tigris::states(progress_bar = FALSE) |>
+      sf::st_transform(4326) |>
+      dplyr::select(STATEFP, GEOID, STUSPS, NAME) |>
+      dplyr::rename(state_name = NAME) |>
       dplyr::filter(!state_name %in% non_conus)
   )
 
-  conus_boundary <- hush(conus_states %>% sf::st_make_valid() %>% sf::st_union())
+  conus_boundary <- hush(conus_states |> sf::st_make_valid() |> sf::st_union())
 
   # ---- 2. Water supplies, filtered to CONUS -------------------------------
   # Some water supplies have NA source_state; fall back to the "state" column.
-  wsd_conus <- water_supplies %>%
+  wsd_conus <- water_supplies |>
     dplyr::mutate(
       source_state = dplyr::coalesce(source_state, state)
-    ) %>%
-    dplyr::filter(source_state %in% conus_states$STUSPS) %>%
-    dplyr::distinct(wsd_source_id, .keep_all = TRUE) %>%
+    ) |>
+    dplyr::filter(source_state %in% conus_states$STUSPS) |>
+    dplyr::distinct(wsd_source_id, .keep_all = TRUE) |>
     dplyr::left_join(
-      conus_states %>%
-        sf::st_drop_geometry() %>%
+      conus_states |>
+        sf::st_drop_geometry() |>
         dplyr::select(source_state = STUSPS, state_name),
       by = "source_state"
-    ) %>%
+    ) |>
     dplyr::select(
       wsd_source_id, park_unit, park_name, region,
       source_state, state_name, water_system_name, system_type,
@@ -193,9 +193,9 @@ process_waterrightsindicator_data <- function(
     if (verbose) message("  reading layer: ", layer)
 
     out <- hush(
-      sf::st_read(gdb_path, layer, quiet = TRUE) %>%
-        sf::st_make_valid() %>%
-        sf::st_transform(sf::st_crs(conus_boundary)) %>%
+      sf::st_read(gdb_path, layer, quiet = TRUE) |>
+        sf::st_make_valid() |>
+        sf::st_transform(sf::st_crs(conus_boundary)) |>
         sf::st_filter(conus_boundary, .predicate = sf::st_intersects)
     )
 
@@ -204,33 +204,33 @@ process_waterrightsindicator_data <- function(
     out
   }
 
-  df_baseline <- read_conus("baseline_annual") %>%
-    dplyr::select(aq30_id, pfaf_id, name_1, bws_raw, bws_score, bws_label) %>%
-    dplyr::filter(pfaf_id != -9999, bws_score != -9999) %>%  # filter out "No Data" [-9999]
+  df_baseline <- read_conus("baseline_annual") |>
+    dplyr::select(aq30_id, pfaf_id, name_1, bws_raw, bws_score, bws_label) |>
+    dplyr::filter(pfaf_id != -9999, bws_score != -9999) |>  # filter out "No Data" [-9999]
     dplyr::mutate(
       bws_label = factor(bws_label, levels = stress_levels, ordered = TRUE),
       dplyr::across(bws_raw, ~ round(.x, 3))
-    ) %>%
+    ) |>
     dplyr::rename_with(~ gsub("^bws_", "baseline_stress_", .x), dplyr::starts_with("bws_"))
 
-  df_future <- read_conus("future_annual") %>%
-    dplyr::select(pfaf_id, dplyr::matches(c("ws_x_r$", "ws_x_s$", "ws_x_l$"))) %>%
-    dplyr::filter(dplyr::if_all(dplyr::matches("ws_x_r$"), ~ !is.na(.x))) %>%
+  df_future <- read_conus("future_annual") |>
+    dplyr::select(pfaf_id, dplyr::matches(c("ws_x_r$", "ws_x_s$", "ws_x_l$"))) |>
+    dplyr::filter(dplyr::if_all(dplyr::matches("ws_x_r$"), ~ !is.na(.x))) |>
     dplyr::mutate(
       dplyr::across(dplyr::matches("ws_x_l$"),
              ~ factor(.x, levels = stress_levels_typo,
                       labels = stress_levels, ordered = TRUE)),
       dplyr::across(dplyr::matches("_x_r$"), ~ round(.x, 3))
-    ) %>%
+    ) |>
     # bau/opt/pes -> rcp70/rcp26/rcp85; suffixes -> raw/score/label
-    dplyr::rename_with(~ .x %>%
-                  gsub("^bau", "rcp70_20", .) %>%
-                  gsub("^opt", "rcp26_20", .) %>%
-                  gsub("^pes", "rcp85_20", .) %>%
-                  gsub("_ws_x_", "_stress_", .) %>%
-                  gsub("_r$", "_raw", .) %>%
-                  gsub("_s$", "_score", .) %>%
-                  gsub("_l$", "_label", .))
+    dplyr::rename_with(~ .x |>
+                  gsub("^bau", "rcp70_20", x = _) |>
+                  gsub("^opt", "rcp26_20", x = _) |>
+                  gsub("^pes", "rcp85_20", x = _) |>
+                  gsub("_ws_x_", "_stress_", x = _) |>
+                  gsub("_r$", "_raw", x = _) |>
+                  gsub("_s$", "_score", x = _) |>
+                  gsub("_l$", "_label", x = _))
 
   # ---- 4. Attach each water system to its sub-basin -----------------------
   # Separate nearest-feature joins: the two layers are at different HydroBASINS
@@ -238,9 +238,9 @@ process_waterrightsindicator_data <- function(
   if (verbose) message("Joining water systems to Aqueduct sub-basins...")
 
   NPSWaterSystems <- hush(
-    wsd_conus %>%
-      sf::st_as_sf() %>%
-      sf::st_make_valid() %>%
+    wsd_conus |>
+      sf::st_as_sf() |>
+      sf::st_make_valid() |>
       sf::st_transform(sf::st_crs(df_baseline))
   )
 
@@ -249,41 +249,41 @@ process_waterrightsindicator_data <- function(
   ws_future   <- hush(sf::st_join(NPSWaterSystems, df_future,
                               join = sf::st_nearest_feature, left = TRUE))
 
-  future_attrs <- ws_future %>%
-    sf::st_drop_geometry() %>%
+  future_attrs <- ws_future |>
+    sf::st_drop_geometry() |>
     dplyr::select(wsd_source_id,
            pfaf_id_future = pfaf_id,
            dplyr::matches("^rcp\\d{2}_\\d{4}_stress_(raw|score|label)$"))
 
-  combined <- ws_baseline %>%
-    sf::st_drop_geometry() %>%
-    dplyr::rename(pfaf_id_baseline = pfaf_id) %>%
+  combined <- ws_baseline |>
+    sf::st_drop_geometry() |>
+    dplyr::rename(pfaf_id_baseline = pfaf_id) |>
     dplyr::left_join(future_attrs, by = "wsd_source_id")
 
   # ---- 5. Long form: one row per system x rcp x period --------------------
-  stress_long <- combined %>%
+  stress_long <- combined |>
     # give baseline a matching two-part prefix so the pivot regex catches it too
     dplyr::rename_with(~ sub("^baseline_stress_", "baseline_baseline_stress_", .x),
-                .cols = dplyr::matches("^baseline_stress_")) %>%
+                .cols = dplyr::matches("^baseline_stress_")) |>
     tidyr::pivot_longer(
       cols = dplyr::matches("_stress_(raw|score|label)$"),
       names_pattern = "^(rcp\\d{2}|baseline)_(\\d{4}|baseline)_stress_(raw|score|label)$",
       names_to = c("rcp", "period", ".value")
-    ) %>%
+    ) |>
     dplyr::rename(stress_raw   = raw,
            stress_score = score,
-           stress_label = label) %>%
+           stress_label = label) |>
     dplyr::mutate(
       stress_label = factor(as.character(stress_label),
                             levels = stress_levels, ordered = TRUE),
       stress_rank  = unname(stress_rank[as.character(stress_label)]),
       rcp          = factor(rcp, levels = c("baseline", "rcp26", "rcp70", "rcp85")),
       period       = factor(period, levels = c("baseline", "2030", "2050", "2080"))
-    ) %>%
+    ) |>
     dplyr::select(wsd_source_id, park_unit, park_name, region, source_state, state_name,
            water_system_name, system_type, source_longitude, source_latitude,
            aq30_id, pfaf_id_baseline, pfaf_id_future,
-           rcp, period, stress_raw, stress_score, stress_label, stress_rank) %>%
+           rcp, period, stress_raw, stress_score, stress_label, stress_rank) |>
     dplyr::arrange(wsd_source_id, period, rcp)
 
   if (verbose) {

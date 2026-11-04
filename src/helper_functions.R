@@ -53,14 +53,14 @@ add_standardized_indicators <- function(data, prefix, invert = FALSE) {
     norm_col <- stringr::str_replace(col, "raw_", "norm_")
     rank_col <- stringr::str_replace(col, "raw_", "rank_")
 
-    data <- data %>%
+    data <- data |>
       dplyr::mutate(
         !!norm_col := if (all(is.na(.data[[col]]))) NA_real_ else scales::rescale(.data[[col]], to = c(0, 1)),
         !!rank_col := dplyr::cume_dist(.data[[col]]) * 100
       )
 
     if (invert) {
-      data <- data %>%
+      data <- data |>
         dplyr::mutate(
           !!norm_col := 1 - .data[[norm_col]],
           !!rank_col := 100 - .data[[rank_col]]

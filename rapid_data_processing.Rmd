@@ -63,8 +63,8 @@ Combine all Gao et al. files and save final file to feed into `calc_fire_exposur
 
 ```{r}
 # read in input datasets
-pyromes <- st_read("data/all/usfs_fire/Pyromes-RDS-2020-0020/Data/Pyromes_CONUS_20200206.shp") %>%
-  st_make_valid() %>%
+pyromes <- st_read("data/all/usfs_fire/Pyromes-RDS-2020-0020/Data/Pyromes_CONUS_20200206.shp") |>
+  st_make_valid() |>
   sf::st_transform(4326)
 
 
@@ -75,32 +75,32 @@ crosswalk <- read_csv("data/all/usfs_fire/fire_projections_gao_2021/gcm_crosswal
 fireprob_historic <- read_csv("data/all/usfs_fire/fire_projections_gao_2021/tables3-fireprob-hist.csv")
 
 # Midcentury is defined as the avg. across 2040-2070:
-delta_fireprob <- read_csv("data/all/usfs_fire/fire_projections_gao_2021/tables12-45-midcentury.csv") %>%
-  pivot_longer(-PYROME, names_to = "gao") %>%
-  left_join(crosswalk, by = "gao") %>%
-  mutate(GCM = paste0(GCM, ".rcp45")) %>%
+delta_fireprob <- read_csv("data/all/usfs_fire/fire_projections_gao_2021/tables12-45-midcentury.csv") |>
+  pivot_longer(-PYROME, names_to = "gao") |>
+  left_join(crosswalk, by = "gao") |>
+  mutate(GCM = paste0(GCM, ".rcp45")) |>
   # do same thing on the 85 CFs, then bind together:
   bind_rows(
     read_csv(
       "data/all/usfs_fire/fire_projections_gao_2021/tables6-85-midcentury.csv"
-    ) %>%
-      tidyr::pivot_longer(-PYROME, names_to = "gao", values_to = "value") %>%
-      left_join(crosswalk, by = "gao") %>%
+    ) |>
+      tidyr::pivot_longer(-PYROME, names_to = "gao", values_to = "value") |>
+      left_join(crosswalk, by = "gao") |>
       mutate(GCM = paste0(GCM, ".rcp85"))
-  ) %>%
+  ) |>
   # join historic data by pyrome:
-  left_join(fireprob_historic, by = "PYROME") %>%
+  left_join(fireprob_historic, by = "PYROME") |>
   # Description: "The probability of a fire increases/decreases by `delta_fp` percent."
   #mutate(delta_fp = 100 * ((value - GridMet)/GridMet))
   # new method, pulling each model's specific hind cast value instead of Gridmet
-  rowwise() %>%
+  rowwise() |>
   # No historic value for NorESM1 so using ensemble mean for that one
   mutate(delta_fp = 100 * ((value - get(
     ifelse(gao == "NorESM1", "ensemblemean", gao)
   )) / get(
     ifelse(gao == "NorESM1", "ensemblemean", gao)
-  ))) %>%
-  ungroup() %>% 
+  ))) |>
+  ungroup() |> 
   select(PYROME, GCM, delta_fp)
 
 ```
@@ -151,7 +151,7 @@ runoff_data <- list.files("data/all/loca2_mwbm/", full.names = TRUE, pattern = "
 # Process all NetCDF files using helper function
 walk(runoff_data, ~process_loca2_mwbm(.x,
                                       output_dir = "data/rapid/inputs/loca2_runoff_water_supplies/",
-                                      water_supplies = water_supplies %>% select(park_unit, wsd_source_id),
+                                      water_supplies = water_supplies |> select(park_unit, wsd_source_id),
                                       var = "runoff",
                                       grab_nearest = TRUE,
                                       historical = c("1979-01-01", "2014-12-31"),
@@ -168,7 +168,7 @@ precip_data <- grep("livneh", list.files("data/all/loca2_mwbm/", full.names = TR
 # Process all NetCDF files using helper function
 walk(precip_data, ~try(process_loca2_mwbm(.x,
                                           output_dir = "data/rapid/inputs/loca2_precipitation_water_supplies/",
-                                          water_supplies = water_supplies %>% select(park_unit, wsd_source_id),
+                                          water_supplies = water_supplies |> select(park_unit, wsd_source_id),
                                           var = "pr",
                                           grab_nearest = TRUE,
                                           historical = c("1979-01-01", "2014-12-31"),
@@ -189,7 +189,7 @@ precip_period_data <- list.files("data/all/loca_cmip6_precip_products/",
                                  pattern = "\\.nc$")
 
 walk(precip_period_data, ~ process_precip_period_data(nc_path = .x,
-                                                      water_supplies = water_supplies %>%
+                                                      water_supplies = water_supplies |>
                                                         select(park_unit, wsd_source_id),
                                                       output_dir = "data/rapid/inputs/loca_cmip6_precip_periods_water_supplies/",
                                                       overwrite = FALSE,
@@ -204,7 +204,7 @@ snow_data <- grep("livneh", list.files("data/all/loca2_mwbm/", full.names = TRUE
 # Process all NetCDF files using helper function
 walk(snow_data, ~process_loca2_mwbm(.x,
                                     output_dir = "data/rapid/inputs/loca2_swe_water_supplies/",
-                                    water_supplies = water_supplies %>% select(park_unit, wsd_source_id),
+                                    water_supplies = water_supplies |> select(park_unit, wsd_source_id),
                                     var = "swe",
                                     grab_nearest = TRUE,
                                     historical = c("1979-01-01", "2014-12-31"),
@@ -221,7 +221,7 @@ pet_data <- list.files("data/all/loca2_mwbm/", full.names = TRUE, pattern = "pet
 # Process all NetCDF files using helper function
 walk(pet_data, ~process_loca2_mwbm(.x,
                                    output_dir = "data/rapid/inputs/loca2_pet_water_supplies/",
-                                   water_supplies = water_supplies %>% select(park_unit, wsd_source_id),
+                                   water_supplies = water_supplies |> select(park_unit, wsd_source_id),
                                    var = "pet",
                                    grab_nearest = TRUE,
                                    historical = c("1979-01-01", "2014-12-31"),
@@ -239,7 +239,7 @@ aet_data <- list.files("data/all/loca2_mwbm/",
 
 walk(aet_data, ~process_loca2_mwbm(.x,
                                    output_dir = "data/rapid/inputs/loca2_aet_water_supplies/",
-                                   water_supplies = water_supplies %>% select(park_unit, wsd_source_id),
+                                   water_supplies = water_supplies |> select(park_unit, wsd_source_id),
                                    var = "aet",
                                    grab_nearest = TRUE,
                                    historical = c("1979-01-01", "2014-12-31"),
@@ -255,7 +255,7 @@ stor_data <- list.files("data/all/loca2_mwbm/",
 
 walk(stor_data, ~process_loca2_mwbm(.x,
                                     output_dir = "data/rapid/inputs/loca2_stor_water_supplies/",
-                                    water_supplies = water_supplies %>% select(park_unit, wsd_source_id),
+                                    water_supplies = water_supplies |> select(park_unit, wsd_source_id),
                                     var = "stor",
                                     grab_nearest = TRUE,
                                     historical = c("1979-01-01", "2014-12-31"),

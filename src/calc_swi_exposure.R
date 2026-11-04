@@ -103,9 +103,9 @@ calc_swi_exposure <- function(
   nearest_idx     <- sf::st_nearest_feature(ws_proj, swi_proj)
   dist_to_nearest <- as.numeric(sf::st_distance(ws_proj, swi_proj[nearest_idx, ], by_element = TRUE))
 
-  swi_assigned <- water_supplies %>%
-    sf::st_drop_geometry() %>%
-    dplyr::select(wsd_source_id, park_unit, park_name) %>%
+  swi_assigned <- water_supplies |>
+    sf::st_drop_geometry() |>
+    dplyr::select(wsd_source_id, park_unit, park_name) |>
     dplyr::mutate(
       raw_swi_migration = dplyr::if_else(dist_to_nearest <= 50000,
                                   swi_pts$Case_C[nearest_idx],
@@ -120,18 +120,18 @@ calc_swi_exposure <- function(
 
   # Divide by distance to coast: raw_swi_migration / coast_dist_m gives the
   # fraction of the land-to-coast corridor projected to be intruded (dimensionless)
-  coast_distances_df <- readr::read_csv(coast_distances, show_col_types = FALSE) %>%
+  coast_distances_df <- readr::read_csv(coast_distances, show_col_types = FALSE) |>
     dplyr::select(wsd_source_id, park_unit, park_name, coast_dist_m)
 
-  swi_weighted <- swi_assigned %>%
-    dplyr::left_join(coast_distances_df, by = c("wsd_source_id", "park_unit", "park_name")) %>%
+  swi_weighted <- swi_assigned |>
+    dplyr::left_join(coast_distances_df, by = c("wsd_source_id", "park_unit", "park_name")) |>
     dplyr::mutate(raw_swi_migration = raw_swi_migration / coast_dist_m,
            # if migration exceeds distance to coast, cap at 1:
-           raw_swi_migration = pmin(raw_swi_migration, 1)) %>%
+           raw_swi_migration = pmin(raw_swi_migration, 1)) |>
     dplyr::select(-coast_dist_m)
   
   # Standardize 
-  results <- swi_weighted %>%
+  results <- swi_weighted |>
     add_standardized_indicators("raw_swi_migration", invert = FALSE)
 
   # Save 

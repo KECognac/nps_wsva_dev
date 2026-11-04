@@ -120,13 +120,13 @@ calc_temp_exposure <- function(water_supplies,
   
   if(hindcast == FALSE){
     # if we want to use training data... select associated files
-    files <- all_files %>%
-      grep("2015|2045|2075|livneh|lusu|training", ., value = TRUE, ignore.case = TRUE)
+    files <- all_files |>
+      grep("2015|2045|2075|livneh|lusu|training", x = _, value = TRUE, ignore.case = TRUE)
     
   } else if(hindcast == TRUE){
     # if we want to use hindcast climate data...
-    files <- all_files %>%
-      grep("training|livneh_unsplit", .,  invert = TRUE, value = TRUE, ignore.case = TRUE)
+    files <- all_files |>
+      grep("training|livneh_unsplit", x = _, invert = TRUE, value = TRUE, ignore.case = TRUE)
   }
   
   # If file names do not carry the same patterns as runoff/precip, assume the
@@ -193,7 +193,7 @@ calc_temp_exposure <- function(water_supplies,
   # grids and times
   process_raw_grid_data <- function(f) {
     
-    raw <- arrow::read_parquet(f) %>%
+    raw <- arrow::read_parquet(f) |>
       dplyr::filter(wsd_source_id %in% water_supplies$wsd_source_id)
     
     annual_points <- data.table::as.data.table(raw)[
@@ -242,7 +242,7 @@ calc_temp_exposure <- function(water_supplies,
     process_raw_grid_data(.x)
   })
   
-  combined_data <- mean_data %>% dplyr::bind_rows()
+  combined_data <- mean_data |> dplyr::bind_rows()
   
   if (nrow(combined_data) == 0) {
     stop("No temperature records found after filtering.")
@@ -298,8 +298,8 @@ calc_temp_exposure <- function(water_supplies,
   if(hindcast == TRUE){
     
     # distinct (model, scenario) pairs that exist in the past and future
-    ssps <- combined_data %>%
-      dplyr::filter(!ssp %in% c("1950-2014", "historical")) %>%
+    ssps <- combined_data |>
+      dplyr::filter(!ssp %in% c("1950-2014", "historical")) |>
       dplyr::distinct(model, ssp, run)
     
     temperature_change_sub <- vector("list", length = nrow(ssps))
@@ -308,39 +308,39 @@ calc_temp_exposure <- function(water_supplies,
       
       ssp_sub <- ssps[i,]
       
-      hindcast_historical <- combined_data %>%
+      hindcast_historical <- combined_data |>
         dplyr::filter(model == ssp_sub$model,
                ssp == "historical",
-               run == ssp_sub$run) %>%
+               run == ssp_sub$run) |>
         dplyr::filter(year >= hist_start_year & year <= hist_end_year)
       
       # if our historical record is actually considered "future" data...
-      hindcast_future <- combined_data %>%
+      hindcast_future <- combined_data |>
         dplyr::filter(model == ssp_sub$model,
                ssp == ssp_sub$ssp,
-               run == ssp_sub$run) %>%
+               run == ssp_sub$run) |>
         dplyr::filter(year >= hist_start_year & year <= hist_end_year,
                !year %in% unique(hindcast_historical$year))
       
-      historical_complete <- hindcast_historical %>%
-        dplyr::bind_rows(hindcast_future) %>%
-        dplyr::group_by(wsd_source_id, park_unit) %>%
+      historical_complete <- hindcast_historical |>
+        dplyr::bind_rows(hindcast_future) |>
+        dplyr::group_by(wsd_source_id, park_unit) |>
         dplyr::summarize(temperature_historical = mean(mean_temperature, na.rm = TRUE),
                   range_historical = paste0(min(year), "-", max(year)),
                   .groups = "drop")
       
-      future_complete <- combined_data %>%
+      future_complete <- combined_data |>
         dplyr::filter(model == ssp_sub$model,
                ssp == ssp_sub$ssp,
-               run == ssp_sub$run) %>%
-        dplyr::filter(year >= future_start_year & year <= future_end_year) %>%
-        dplyr::group_by(wsd_source_id, park_unit) %>%
+               run == ssp_sub$run) |>
+        dplyr::filter(year >= future_start_year & year <= future_end_year) |>
+        dplyr::group_by(wsd_source_id, park_unit) |>
         dplyr::summarize(temperature_future = mean(mean_temperature, na.rm = TRUE),
                   period_future = paste0(min(year), "-", max(year)),
                   .groups = "drop")
       
-      temperature_change_sub[[i]] <- future_complete %>%
-        dplyr::inner_join(., historical_complete, by = c("wsd_source_id", "park_unit")) %>%
+      temperature_change_sub[[i]] <- future_complete |>
+        dplyr::inner_join(historical_complete, by = c("wsd_source_id", "park_unit")) |>
         dplyr::mutate(model = ssp_sub$model,
                ssp = ssp_sub$ssp,
                run = ssp_sub$run,
@@ -352,14 +352,14 @@ calc_temp_exposure <- function(water_supplies,
   } else if(hindcast == FALSE){
     
     # distinct (model, scenario) pairs that exist in the past and future
-    ssps <- combined_data %>%
-      dplyr::filter(ssp != "training" & ssp != "historical") %>%
+    ssps <- combined_data |>
+      dplyr::filter(ssp != "training" & ssp != "historical") |>
       dplyr::distinct(model, ssp, run)
     
-    training_historical <- combined_data %>%
-      dplyr::filter(ssp == "training" | ssp == "historical") %>%
-      dplyr::group_by(wsd_source_id, park_unit) %>%
-      dplyr::filter(year >= hist_start_year & year <= hist_end_year) %>%
+    training_historical <- combined_data |>
+      dplyr::filter(ssp == "training" | ssp == "historical") |>
+      dplyr::group_by(wsd_source_id, park_unit) |>
+      dplyr::filter(year >= hist_start_year & year <= hist_end_year) |>
       dplyr::summarize(temperature_historical = mean(mean_temperature, na.rm = TRUE),
                 range_historical = paste0(min(year), "-", max(year)),
                 .groups = "drop")
@@ -370,18 +370,18 @@ calc_temp_exposure <- function(water_supplies,
       suppressMessages({suppressWarnings({
         ssp_sub <- ssps[i,]
         
-        future_complete <- combined_data %>%
+        future_complete <- combined_data |>
           dplyr::filter(model == ssp_sub$model,
                  ssp == ssp_sub$ssp,
-                 run == ssp_sub$run) %>%
-          dplyr::filter(year >= future_start_year & year <= future_end_year) %>%
-          dplyr::group_by(wsd_source_id, park_unit) %>%
+                 run == ssp_sub$run) |>
+          dplyr::filter(year >= future_start_year & year <= future_end_year) |>
+          dplyr::group_by(wsd_source_id, park_unit) |>
           dplyr::summarize(temperature_future = mean(mean_temperature, na.rm = TRUE),
                     period_future = paste0(min(year), "-", max(year)),
                     .groups = "drop")
         
-        temperature_change_sub[[i]] <- future_complete %>%
-          dplyr::inner_join(., training_historical, by = c("wsd_source_id", "park_unit")) %>%
+        temperature_change_sub[[i]] <- future_complete |>
+          dplyr::inner_join(training_historical, by = c("wsd_source_id", "park_unit")) |>
           dplyr::mutate(model = ssp_sub$model,
                  ssp = ssp_sub$ssp,
                  run = ssp_sub$run,
@@ -401,55 +401,55 @@ calc_temp_exposure <- function(water_supplies,
   # calculate percentile indicators:
   suppressMessages({suppressWarnings({
     
-    p10_values <- temperature_change %>%
-      dplyr::group_by(park_unit, wsd_source_id) %>%
+    p10_values <- temperature_change |>
+      dplyr::group_by(park_unit, wsd_source_id) |>
       dplyr::mutate(p10 = stats::quantile(temperature_change, 0.10, na.rm = TRUE),
-             diff_from_p10 = abs(temperature_change - p10)) %>%
-      dplyr::filter(diff_from_p10 == min(diff_from_p10, na.rm = TRUE)) %>%
-      dplyr::slice(1) %>%  # take first if ties
-      dplyr::ungroup() %>%
+             diff_from_p10 = abs(temperature_change - p10)) |>
+      dplyr::filter(diff_from_p10 == min(diff_from_p10, na.rm = TRUE)) |>
+      dplyr::slice(1) |>  # take first if ties
+      dplyr::ungroup() |>
       dplyr::select(wsd_source_id,
              park_unit,
              raw_temperature_change_p10 = temperature_change)
     
-    p50_values <- temperature_change %>%
-      dplyr::group_by(park_unit, wsd_source_id) %>%
+    p50_values <- temperature_change |>
+      dplyr::group_by(park_unit, wsd_source_id) |>
       dplyr::mutate(p50 = stats::median(temperature_change, na.rm = TRUE),
-             diff_from_p50 = abs(temperature_change - p50)) %>%
-      dplyr::filter(diff_from_p50 == min(diff_from_p50, na.rm = TRUE)) %>%
-      dplyr::slice(1) %>%  # take first if ties
-      dplyr::ungroup() %>%
+             diff_from_p50 = abs(temperature_change - p50)) |>
+      dplyr::filter(diff_from_p50 == min(diff_from_p50, na.rm = TRUE)) |>
+      dplyr::slice(1) |>  # take first if ties
+      dplyr::ungroup() |>
       dplyr::select(wsd_source_id,
              park_unit,
              raw_temperature_change_p50 = temperature_change)
     
-    p90_values <- temperature_change %>%
-      dplyr::group_by(park_unit, wsd_source_id) %>%
+    p90_values <- temperature_change |>
+      dplyr::group_by(park_unit, wsd_source_id) |>
       dplyr::mutate(p90 = stats::quantile(temperature_change, 0.90, na.rm = TRUE),
-             diff_from_p90 = abs(temperature_change - p90)) %>%
-      dplyr::filter(diff_from_p90 == min(diff_from_p90, na.rm = TRUE)) %>%
-      dplyr::slice(1) %>%  # take first if ties
-      dplyr::ungroup() %>%
+             diff_from_p90 = abs(temperature_change - p90)) |>
+      dplyr::filter(diff_from_p90 == min(diff_from_p90, na.rm = TRUE)) |>
+      dplyr::slice(1) |>  # take first if ties
+      dplyr::ungroup() |>
       dplyr::select(wsd_source_id,
              park_unit,
              raw_temperature_change_p90 = temperature_change)
     
     # calculate fraction of models showing warming
-    model_fractions <- temperature_change %>%
-      dplyr::group_by(park_unit, wsd_source_id) %>%
+    model_fractions <- temperature_change |>
+      dplyr::group_by(park_unit, wsd_source_id) |>
       dplyr::summarize(raw_temp_models_showing_increase = 100 * sum(temperature_change > 0, na.rm = TRUE) / dplyr::n(),
                 .groups = "drop")
     
   })})
   
   # Combine all indicators using standardized joins
-  final_results <- p10_values %>%
-    dplyr::left_join(p50_values, by = c("wsd_source_id", "park_unit")) %>%
-    dplyr::left_join(p90_values, by = c("wsd_source_id", "park_unit")) %>%
-    dplyr::left_join(model_fractions, by = c("wsd_source_id", "park_unit")) %>%
+  final_results <- p10_values |>
+    dplyr::left_join(p50_values, by = c("wsd_source_id", "park_unit")) |>
+    dplyr::left_join(p90_values, by = c("wsd_source_id", "park_unit")) |>
+    dplyr::left_join(model_fractions, by = c("wsd_source_id", "park_unit")) |>
     # add standardized indicators using helper function
-    add_standardized_indicators("raw_temperature_change", invert = FALSE) %>%
-    add_standardized_indicators("raw_temp_models_showing_increase") %>%
+    add_standardized_indicators("raw_temperature_change", invert = FALSE) |>
+    add_standardized_indicators("raw_temp_models_showing_increase") |>
     # reorder columns following standardized pattern
     dplyr::select(wsd_source_id, park_unit, dplyr::everything())
   

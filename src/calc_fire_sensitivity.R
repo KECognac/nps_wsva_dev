@@ -154,7 +154,7 @@ calc_fire_sensitivity <- function(water_supplies,
   })
   
   # Average across geometries if a wsd_source_id had multiple entries in water_supplies
-  results <- results %>% 
+  results <- results |> 
     dplyr::summarise(
       raw_wildfire_hazard_mean = mean(raw_wildfire_hazard_mean, na.rm = TRUE),
       park_unit = dplyr::first(park_unit),
@@ -163,7 +163,7 @@ calc_fire_sensitivity <- function(water_supplies,
     )
   
   # Calculate standardized indicators using helper function  
-  final_results <- results %>%
+  final_results <- results |>
     add_standardized_indicators("raw_wildfire_hazard")
   
   # Save results

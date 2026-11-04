@@ -247,10 +247,10 @@ process_loca2_mwbm <- function(nc_path,
     )
   }
   
-  neighbor_list <- dplyr::bind_rows(neighbor_list) %>%
+  neighbor_list <- dplyr::bind_rows(neighbor_list) |>
     # Clamping at raster edges can map multiple offsets to the same cell.
     # Keep each available grid cell once rather than weighting edge cells twice.
-    dplyr::distinct(point_id, lon_index, lat_index, .keep_all = TRUE) %>%
+    dplyr::distinct(point_id, lon_index, lat_index, .keep_all = TRUE) |>
     # Add actual geographic coordinates for each neighborhood cell.
     dplyr::mutate(
       cell_lon = lon[lon_index],
@@ -383,10 +383,10 @@ process_loca2_mwbm <- function(nc_path,
       if (nrow(search_cells) > 0) {
         search_values <- extract_cells(search_cells)
         search_cells$has_data <- rowSums(is.finite(search_values)) > 0
-        nearest_centers <- search_cells %>%
-          dplyr::filter(has_data) %>%
-          dplyr::group_by(point_id) %>%
-          dplyr::slice_min(distance_m, n = 1, with_ties = FALSE) %>%
+        nearest_centers <- search_cells |>
+          dplyr::filter(has_data) |>
+          dplyr::group_by(point_id) |>
+          dplyr::slice_min(distance_m, n = 1, with_ties = FALSE) |>
           dplyr::ungroup()
 
         if (nrow(nearest_centers) > 0) {
@@ -399,8 +399,8 @@ process_loca2_mwbm <- function(nc_path,
               lon_index = pmax(1, pmin(length(lon), center_lon + offsets$lon_offset)),
               lat_index = pmax(1, pmin(length(lat), center_lat + offsets$lat_offset))
             )
-          })) %>%
-            dplyr::distinct(point_id, lon_index, lat_index, .keep_all = TRUE) %>%
+          })) |>
+            dplyr::distinct(point_id, lon_index, lat_index, .keep_all = TRUE) |>
             dplyr::mutate(
               cell_lon = lon[lon_index],
               cell_lat = lat[lat_index]
@@ -486,7 +486,7 @@ process_loca2_mwbm <- function(nc_path,
     results_dt[, ym := as.Date(format(date, "%Y-%m-01"))]
     results_dt[, days_in_month := lubridate::days_in_month(ym)]
     
-    results_dt <- results_dt %>%
+    results_dt <- results_dt |>
       dplyr::mutate(value = value * 86400 * days_in_month)
     
   } else if(mwbm_units == "K"){
@@ -494,7 +494,7 @@ process_loca2_mwbm <- function(nc_path,
     # Temperature variables are stored in Kelvin; convert to Celsius.
     message(mwbm_units)
     
-    results_dt <- results_dt %>%
+    results_dt <- results_dt |>
       dplyr::mutate(value = value - 273.15)
     
   }

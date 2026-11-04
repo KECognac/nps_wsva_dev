@@ -115,13 +115,13 @@ calc_runoff_exposure <- function(water_supplies,
   
   if(hindcast == FALSE){
     # if we want to use training data... select associated files
-    files <- list.files(runoff_data, full.names = TRUE) %>%
-      grep("2015-2100|training", ., value = TRUE)
+    files <- list.files(runoff_data, full.names = TRUE) |>
+      grep("2015-2100|training", x = _, value = TRUE)
     
   } else if(hindcast == TRUE){
     # if we want to use hindcast climate data... 
-    files <- list.files(runoff_data, full.names = TRUE) %>%
-      grep("training", .,  invert = TRUE, value = TRUE)
+    files <- list.files(runoff_data, full.names = TRUE) |>
+      grep("training", x = _, invert = TRUE, value = TRUE)
   } 
   
   # Check if we have any files to process
@@ -145,7 +145,7 @@ calc_runoff_exposure <- function(water_supplies,
   # grids and times
   process_raw_grid_data <- function(f) {
     
-    raw <- arrow::read_parquet(f) %>%
+    raw <- arrow::read_parquet(f) |>
       dplyr::filter(wsd_source_id %in% water_supplies$wsd_source_id)
     
     # grabs year (or water year if water_year = TRUE)
@@ -187,7 +187,7 @@ calc_runoff_exposure <- function(water_supplies,
     process_raw_grid_data(.x)
   })
   
-  combined_data <- mean_data %>% dplyr::bind_rows()
+  combined_data <- mean_data |> dplyr::bind_rows()
   
   data.table::setDT(combined_data)
   
@@ -215,8 +215,8 @@ calc_runoff_exposure <- function(water_supplies,
   if(hindcast == TRUE){
     
     # distinct (model, scenario) pairs that exist in the past and future
-    ssps <- combined_data %>%
-      dplyr::filter(ssp != "historical") %>%
+    ssps <- combined_data |>
+      dplyr::filter(ssp != "historical") |>
       dplyr::distinct(model, ssp, run)
     
     runoff_change_sub <- vector("list", length = nrow(ssps))
@@ -225,38 +225,38 @@ calc_runoff_exposure <- function(water_supplies,
       
       ssp_sub <- ssps[i,]
       
-      hindcast_historical <- combined_data %>%
+      hindcast_historical <- combined_data |>
         dplyr::filter(model == ssp_sub$model,
                ssp == "historical",
-               run == ssp_sub$run) %>%
+               run == ssp_sub$run) |>
         dplyr::filter(year >= hist_start_year & year <= hist_end_year)
       
-      hindcast_future <- combined_data %>%
+      hindcast_future <- combined_data |>
         dplyr::filter(model == ssp_sub$model,
                ssp == ssp_sub$ssp,
-               run == ssp_sub$run) %>%
+               run == ssp_sub$run) |>
         dplyr::filter(year >= hist_start_year & year <= hist_end_year,
                !year %in% unique(hindcast_historical$year))
       
-      historical <- hindcast_historical %>%
-        dplyr::bind_rows(hindcast_future) %>%
-        dplyr::group_by(wsd_source_id, park_unit) %>%
+      historical <- hindcast_historical |>
+        dplyr::bind_rows(hindcast_future) |>
+        dplyr::group_by(wsd_source_id, park_unit) |>
         dplyr::summarize(runoff_historical = mean(total_runoff, na.rm = TRUE),
                   range_historical = paste0(min(year), "-", max(year)),
                   .groups = "drop")
       
-      future <- combined_data %>% 
+      future <- combined_data |> 
         dplyr::filter(model == ssp_sub$model,
                ssp == ssp_sub$ssp,
-               run == ssp_sub$run) %>%
-        dplyr::filter(year >= future_start_year & year <= future_end_year) %>%
-        dplyr::group_by(wsd_source_id, park_unit) %>%
+               run == ssp_sub$run) |>
+        dplyr::filter(year >= future_start_year & year <= future_end_year) |>
+        dplyr::group_by(wsd_source_id, park_unit) |>
         dplyr::summarize(runoff_future = mean(total_runoff, na.rm = TRUE),
                   period_future = paste0(min(year), "-", max(year)),
                   .groups = "drop")
       
-      runoff_change_sub[[i]] <- future %>%
-        dplyr::inner_join(., historical, by = c("wsd_source_id", "park_unit")) %>%
+      runoff_change_sub[[i]] <- future |>
+        dplyr::inner_join(historical, by = c("wsd_source_id", "park_unit")) |>
         dplyr::mutate(model = ssp_sub$model,
                ssp = ssp_sub$ssp,
                run = ssp_sub$run,
@@ -269,12 +269,12 @@ calc_runoff_exposure <- function(water_supplies,
   } else if(hindcast == FALSE){
     
     # distinct (model, scenario) pairs that exist in the past and future
-    ssps <- combined_data %>%
-      dplyr::filter(ssp != "training") %>%
+    ssps <- combined_data |>
+      dplyr::filter(ssp != "training") |>
       dplyr::distinct(model, ssp, run)
     
-    training_historical <- combined_data %>%
-      dplyr::filter(ssp == "training") %>%
+    training_historical <- combined_data |>
+      dplyr::filter(ssp == "training") |>
       dplyr::filter(year >= hist_start_year & year <= hist_end_year)
     
     runoff_change_sub <- vector("list", length = nrow(ssps))
@@ -283,32 +283,32 @@ calc_runoff_exposure <- function(water_supplies,
       suppressMessages({suppressWarnings({
         ssp_sub <- ssps[i,]
         
-        model_historical <- combined_data %>%
+        model_historical <- combined_data |>
           dplyr::filter(model == ssp_sub$model,
                  ssp == ssp_sub$ssp,
-                 run == ssp_sub$run) %>%
+                 run == ssp_sub$run) |>
           dplyr::filter(year >= hist_start_year & year <= hist_end_year,
                  !year %in% training_historical$year)
         
-        historical_complete <- training_historical %>%
-          dplyr::bind_rows(model_historical) %>%
-          dplyr::group_by(wsd_source_id, park_unit) %>%
+        historical_complete <- training_historical |>
+          dplyr::bind_rows(model_historical) |>
+          dplyr::group_by(wsd_source_id, park_unit) |>
           dplyr::summarize(runoff_historical = mean(total_runoff, na.rm = TRUE),
                     range_historical = paste0(min(year), "-", max(year)),
                     .groups = "drop")
         
-        future_complete <- combined_data %>% 
+        future_complete <- combined_data |> 
           dplyr::filter(model == ssp_sub$model,
                  ssp == ssp_sub$ssp,
-                 run == ssp_sub$run) %>%
-          dplyr::filter(year >= future_start_year & year <= future_end_year) %>%
-          dplyr::group_by(wsd_source_id, park_unit) %>%
+                 run == ssp_sub$run) |>
+          dplyr::filter(year >= future_start_year & year <= future_end_year) |>
+          dplyr::group_by(wsd_source_id, park_unit) |>
           dplyr::summarize(runoff_future = mean(total_runoff, na.rm = TRUE),
                     period_future = paste0(min(year), "-", max(year)),
                     .groups = "drop")
         
-        runoff_change_sub[[i]] <- future_complete %>%
-          dplyr::inner_join(., historical_complete, by = c("wsd_source_id", "park_unit")) %>%
+        runoff_change_sub[[i]] <- future_complete |>
+          dplyr::inner_join(historical_complete, by = c("wsd_source_id", "park_unit")) |>
           dplyr::mutate(model = ssp_sub$model,
                  ssp = ssp_sub$ssp,
                  run = ssp_sub$run,
@@ -326,55 +326,55 @@ calc_runoff_exposure <- function(water_supplies,
   # calculate percentile indicators:
   suppressMessages({suppressWarnings({
     
-    p10_values <- runoff_change %>%
-      dplyr::group_by(park_unit, wsd_source_id) %>%
+    p10_values <- runoff_change |>
+      dplyr::group_by(park_unit, wsd_source_id) |>
       dplyr::mutate(p10 = stats::quantile(percent_change, 0.10, na.rm = TRUE),
-             diff_from_p10 = abs(percent_change - p10)) %>%
-      dplyr::filter(diff_from_p10 == min(diff_from_p10, na.rm = TRUE)) %>%
-      dplyr::slice(1) %>%  # take first if ties
-      dplyr::ungroup() %>%
+             diff_from_p10 = abs(percent_change - p10)) |>
+      dplyr::filter(diff_from_p10 == min(diff_from_p10, na.rm = TRUE)) |>
+      dplyr::slice(1) |>  # take first if ties
+      dplyr::ungroup() |>
       dplyr::select(wsd_source_id,
              park_unit,
              raw_runoff_change_p10 = percent_change)
     
-    p50_values <- runoff_change %>%
-      dplyr::group_by(park_unit, wsd_source_id) %>%
+    p50_values <- runoff_change |>
+      dplyr::group_by(park_unit, wsd_source_id) |>
       dplyr::mutate(p50 = stats::median(percent_change, na.rm = TRUE),
-             diff_from_p50 = abs(percent_change - p50)) %>%
-      dplyr::filter(diff_from_p50 == min(diff_from_p50, na.rm = TRUE)) %>%
-      dplyr::slice(1) %>%  # take first if ties
-      dplyr::ungroup() %>%
+             diff_from_p50 = abs(percent_change - p50)) |>
+      dplyr::filter(diff_from_p50 == min(diff_from_p50, na.rm = TRUE)) |>
+      dplyr::slice(1) |>  # take first if ties
+      dplyr::ungroup() |>
       dplyr::select(wsd_source_id,
              park_unit,
              raw_runoff_change_p50 = percent_change)
     
-    p90_values <- runoff_change %>%
-      dplyr::group_by(park_unit, wsd_source_id) %>%
+    p90_values <- runoff_change |>
+      dplyr::group_by(park_unit, wsd_source_id) |>
       dplyr::mutate(p90 = stats::quantile(percent_change, 0.90, na.rm = TRUE),
-             diff_from_p90 = abs(percent_change - p90)) %>%
-      dplyr::filter(diff_from_p90 == min(diff_from_p90, na.rm = TRUE)) %>%
-      dplyr::slice(1) %>%  # take first if ties
-      dplyr::ungroup() %>%
+             diff_from_p90 = abs(percent_change - p90)) |>
+      dplyr::filter(diff_from_p90 == min(diff_from_p90, na.rm = TRUE)) |>
+      dplyr::slice(1) |>  # take first if ties
+      dplyr::ungroup() |>
       dplyr::select(wsd_source_id,
              park_unit,
              raw_runoff_change_p90 = percent_change)
     
     # calculate fraction of models showing decrease
-    model_fractions <- runoff_change %>%
-      dplyr::group_by(park_unit, wsd_source_id) %>%
+    model_fractions <- runoff_change |>
+      dplyr::group_by(park_unit, wsd_source_id) |>
       dplyr::summarize(raw_runoff_models_showing_decrease = 100 * sum(percent_change < 0, na.rm = TRUE) / dplyr::n(),
                 .groups = "drop")
     
   })})
   
   # Combine all indicators using standardized joins
-  final_results <- p10_values %>%
-    dplyr::left_join(p50_values, by = c("wsd_source_id", "park_unit")) %>%
-    dplyr::left_join(p90_values, by = c("wsd_source_id", "park_unit")) %>%
-    dplyr::left_join(model_fractions, by = c("wsd_source_id", "park_unit")) %>%
+  final_results <- p10_values |>
+    dplyr::left_join(p50_values, by = c("wsd_source_id", "park_unit")) |>
+    dplyr::left_join(p90_values, by = c("wsd_source_id", "park_unit")) |>
+    dplyr::left_join(model_fractions, by = c("wsd_source_id", "park_unit")) |>
     # add standardized indicators using helper function
-    add_standardized_indicators("raw_runoff_change", invert = TRUE) %>%
-    add_standardized_indicators("raw_runoff_models_showing_decrease") %>%
+    add_standardized_indicators("raw_runoff_change", invert = TRUE) |>
+    add_standardized_indicators("raw_runoff_models_showing_decrease") |>
     # reorder columns following standardized pattern
     dplyr::select(wsd_source_id, park_unit, dplyr::everything())
   

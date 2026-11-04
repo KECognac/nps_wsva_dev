@@ -27,8 +27,8 @@ getParkwideVisitation <- function(startYear, endYear){
   
   years <- (startYear:endYear)
   
-  parkwide <- years %>% 
-    map(~ visits(year = .)) %>% 
+  parkwide <- years |> 
+    map(~ visits(year = .)) |> 
     bind_rows()
   
   return(parkwide)

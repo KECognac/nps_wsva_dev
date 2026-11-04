@@ -119,16 +119,16 @@ calc_visitation_exposure <- function(water_supplies,
                                     endYear = 2024)
     
     # check if park has timed entry
-    timed_entry_info <- timed_entry_parks %>% dplyr::filter(.data$park_unit == !!park_unit)
+    timed_entry_info <- timed_entry_parks |> dplyr::filter(.data$park_unit == !!park_unit)
     has_timed_entry <- nrow(timed_entry_info) > 0
     timed_entry_year <- if(has_timed_entry) timed_entry_info$timed_entry_year else NA
     
     # calculate annual totals
-    annual_visitation <- visitation %>%
-      dplyr::group_by(Year) %>%
+    annual_visitation <- visitation |>
+      dplyr::group_by(Year) |>
       dplyr::summarize(total = sum(RecreationVisitors), .groups = "drop")
     
-    seasonal_visitation <- visitation %>%
+    seasonal_visitation <- visitation |>
       dplyr::mutate(date = lubridate::ym(paste0(Year, "-", Month)),
              season = dplyr::case_when(Month %in% c(12, 1, 2) ~ "Winter",
                                 Month %in% c(3, 4, 5) ~ "Spring",
@@ -149,7 +149,7 @@ calc_visitation_exposure <- function(water_supplies,
     # calculate baseline growth in absolute visitors per year
     # baseline_slope <- pred_2024 * baseline_growth_rate
     # 
-    # pred_2024 <- annual_visitation %>% filter(Year == 2024) %>% pull(total)
+    # pred_2024 <- annual_visitation |> filter(Year == 2024) |> pull(total)
     
     pred_2024 <- stats::predict(lm_total, newdata = data.frame(Year = 2024))
     baseline_slope <- pred_2024 * baseline_growth_rate
@@ -182,21 +182,21 @@ calc_visitation_exposure <- function(water_supplies,
     pct_change <- 100*((pred_2050 - pred_2024) / pred_2024)
     
     # other fun facts:
-    peak_year <- annual_visitation %>%
-      dplyr::filter(total == max(total, na.rm = TRUE)) %>%
-      dplyr::pull(Year) %>%
+    peak_year <- annual_visitation |>
+      dplyr::filter(total == max(total, na.rm = TRUE)) |>
+      dplyr::pull(Year) |>
       paste(collapse = ", ")
     
     # projected change in seasonality (exclude COVID years):
-    monthly_percentages <- visitation %>%
-      dplyr::filter(!Year %in% c(2020, 2021)) %>%
-      dplyr::group_by(Year) %>%
+    monthly_percentages <- visitation |>
+      dplyr::filter(!Year %in% c(2020, 2021)) |>
+      dplyr::group_by(Year) |>
       dplyr::mutate(annual_total = sum(RecreationVisitors),
-             monthly_percentage = RecreationVisitors / annual_total * 100) %>%
+             monthly_percentage = RecreationVisitors / annual_total * 100) |>
       dplyr::ungroup()
     
-    seasonal_variation <- monthly_percentages %>%
-      dplyr::group_by(Year) %>%
+    seasonal_variation <- monthly_percentages |>
+      dplyr::group_by(Year) |>
       dplyr::summarize(cv_monthly = stats::sd(monthly_percentage) / mean(monthly_percentage) * 100,
                 .groups = "drop")
     
@@ -236,39 +236,39 @@ calc_visitation_exposure <- function(water_supplies,
     )
   }
   
-  indicators <- parks %>%
-    purrr::map(purrr::possibly(~ visitation_indicators(.x), otherwise = NULL)) %>%
-    purrr::keep(~!is.null(.)) %>%
+  indicators <- parks |>
+    purrr::map(purrr::possibly(~ visitation_indicators(.x), otherwise = NULL)) |>
+    purrr::keep(~!is.null(.)) |>
     dplyr::bind_rows()
   
-  norm_indicators <- indicators %>%
-    add_standardized_indicators(., prefix = "raw_visitation") %>%
-    dplyr::left_join(water_supplies, ., by = "park_unit")
+  norm_indicators <- indicators |>
+    add_standardized_indicators(prefix = "raw_visitation") |>
+    dplyr::left_join(x = water_supplies, y = _, by = "park_unit")
   
   if(verbose) {
     message("Visitation exposure calculated for ", nrow(indicators), " parks")
     
-    timed_entry_baseline <- indicators %>% dplyr::filter(slope_adjustment == "baseline_timed_entry")
+    timed_entry_baseline <- indicators |> dplyr::filter(slope_adjustment == "baseline_timed_entry")
     if(nrow(timed_entry_baseline) > 0) {
       message("  Applied baseline growth (", baseline_growth_rate*100, "% annually) to ",
               nrow(timed_entry_baseline), " parks with timed entry:")
       message("    ", paste(timed_entry_baseline$park_unit, collapse = ", "))
     }
     
-    negative_baseline <- indicators %>% dplyr::filter(slope_adjustment == "baseline_negative")
+    negative_baseline <- indicators |> dplyr::filter(slope_adjustment == "baseline_negative")
     if(nrow(negative_baseline) > 0) {
       message("  Applied baseline growth (", baseline_growth_rate*100, "% annually) to ",
               nrow(negative_baseline), " parks with negative trends:")
       message("    ", paste(negative_baseline$park_unit, collapse = ", "))
     }
     
-    insufficient_baseline <- indicators %>% dplyr::filter(slope_adjustment == "baseline_insufficient_data")
+    insufficient_baseline <- indicators |> dplyr::filter(slope_adjustment == "baseline_insufficient_data")
     if(nrow(insufficient_baseline) > 0) {
       message("  Applied baseline growth (", baseline_growth_rate*100, "% annually) to ",
               nrow(insufficient_baseline), " parks with insufficient data (< 14 years):")
       message("    ", paste(insufficient_baseline$park_unit, collapse = ", "))
     }
-    below_baseline <- indicators %>% dplyr::filter(slope_adjustment == "trend_below_baseline")
+    below_baseline <- indicators |> dplyr::filter(slope_adjustment == "trend_below_baseline")
     if(nrow(below_baseline) > 0) {
       message("  Applied baseline growth (", baseline_growth_rate*100, "% annually) to ",
               nrow(below_baseline), " parks with less than the baseline growth rate:")
@@ -276,7 +276,7 @@ calc_visitation_exposure <- function(water_supplies,
     }
     
     
-    unadjusted <- indicators %>% dplyr::filter(slope_adjustment == "none")
+    unadjusted <- indicators |> dplyr::filter(slope_adjustment == "none")
     message("  ", nrow(unadjusted), " parks using original observed trends")
   }
   

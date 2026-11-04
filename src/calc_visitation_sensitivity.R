@@ -83,8 +83,8 @@ calc_visitation_sensitivity <- function(water_supplies,
     "VALR" = "PERL"
   )
   
-  parks <- water_supplies %>%
-    dplyr::distinct(park_unit) %>%
+  parks <- water_supplies |>
+    dplyr::distinct(park_unit) |>
     dplyr::pull(park_unit)
   
   if (verbose) {
@@ -103,10 +103,10 @@ calc_visitation_sensitivity <- function(water_supplies,
                                     startYear = start_year,
                                     endYear = end_year)
     
-    annual_visitation <- visitation %>%
-      dplyr::group_by(Year) %>%
+    annual_visitation <- visitation |>
+      dplyr::group_by(Year) |>
       dplyr::summarize(total_visitation = sum(RecreationVisitors, na.rm = TRUE),
-                       .groups = "drop") %>%
+                       .groups = "drop") |>
       dplyr::arrange(Year)
     
     n_years <- sum(!is.na(annual_visitation$total_visitation))
@@ -140,9 +140,9 @@ calc_visitation_sensitivity <- function(water_supplies,
                                         raw_sen_slope < 0 ~ "decreasing",
                                         TRUE ~ "no change")
     
-    peak_year <- annual_visitation %>%
-      dplyr::filter(total_visitation == max(total_visitation, na.rm = TRUE)) %>%
-      dplyr::pull(Year) %>%
+    peak_year <- annual_visitation |>
+      dplyr::filter(total_visitation == max(total_visitation, na.rm = TRUE)) |>
+      dplyr::pull(Year) |>
       paste(collapse = ", ")
     
     tibble::tibble(park_unit = park_unit,
@@ -161,21 +161,21 @@ calc_visitation_sensitivity <- function(water_supplies,
     
   }
   
-  indicators <- parks %>%
+  indicators <- parks |>
     purrr::map(purrr::possibly(
-      ~ visitation_indicators(.x), otherwise = NULL)) %>%
-    purrr::keep(~ !is.null(.x)) %>%
+      ~ visitation_indicators(.x), otherwise = NULL)) |>
+    purrr::keep(~ !is.null(.x)) |>
     dplyr::bind_rows()
   
-  final_results <- water_supplies %>%
-    dplyr::select(park_unit, wsd_source_id) %>%
-    dplyr::left_join(indicators, by = "park_unit") %>%
-    add_standardized_indicators("raw_visitation_slope") %>%
+  final_results <- water_supplies |>
+    dplyr::select(park_unit, wsd_source_id) |>
+    dplyr::left_join(indicators, by = "park_unit") |>
+    add_standardized_indicators("raw_visitation_slope") |>
     # annual percent change in visitation relative to a park’s average visitation 
     # over the analysis period
-    add_standardized_indicators("raw_scaled_trend_visitation") %>%
-    add_standardized_indicators("raw_avg_visitation") %>% 
-    sf::st_drop_geometry() %>%
+    add_standardized_indicators("raw_scaled_trend_visitation") |>
+    add_standardized_indicators("raw_avg_visitation") |> 
+    sf::st_drop_geometry() |>
     dplyr::select(wsd_source_id, park_unit, dplyr::everything()) 
   
   if (save) {

@@ -76,8 +76,8 @@ calc_flood_risk <-
     )
     
     # buffer points to specified distance
-    data <- data %>% 
-      sf::st_transform(crs = 32616) %>% 
+    data <- data |> 
+      sf::st_transform(crs = 32616) |> 
       sf::st_buffer(dist = dist)
     
     # match CRS to that of FEMA flood layer
@@ -141,13 +141,13 @@ calc_flood_risk <-
       # )
       
       ## read in floodplain
-      # floodHaz <- sf::read_sf(url) %>%
+      # floodHaz <- sf::read_sf(url) |>
       #   st_make_valid()
       
       ## read in floodplain with error handling
       floodHaz <- tryCatch(
         {
-          sf::read_sf(url) %>%
+          sf::read_sf(url) |>
             sf::st_make_valid()
         },
         error = function(e) {
@@ -181,7 +181,7 @@ calc_flood_risk <-
         
       } else {
         ## filter to zones that hve A or V in them - high-risk flood zones/1% flood prob https://floodpartners.com/flood-zones/
-        floodRisk <- floodHaz %>%
+        floodRisk <- floodHaz |>
           dplyr::filter(stringr::str_detect(FLD_ZONE, "A|V") &
                    FLD_ZONE != "AREA NOT INCLUDED") # not sure if 'area not included' is in fema raw data
         
@@ -237,7 +237,7 @@ calc_flood_risk <-
     )
     
     # Average across geometries if a wsd_source_id had multiple entries in water_supplies
-    results <- results %>% 
+    results <- results |> 
       dplyr::summarise(
         raw_flood_risk_area_m2  = mean(raw_flood_risk_area_m2, na.rm = TRUE),
         raw_flood_risk_percent  = mean(raw_flood_risk_percent, na.rm = TRUE),
@@ -247,7 +247,7 @@ calc_flood_risk <-
       )
     
     # Calculate standardized indicators using helper function
-    final_results <- results %>%
+    final_results <- results |>
       add_standardized_indicators("raw_flood_risk")
     
     # Save results

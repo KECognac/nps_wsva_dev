@@ -105,22 +105,22 @@ calc_groundwater_depth_sensitivity <- function(water_supplies,
   # from the well-depth/modeled-WTD priority chain below; all other
   # (non-groundwater/spring) source types are hardcoded to a depth of 0.
   
-  all_supplies <- water_supplies %>%
-    sf::st_drop_geometry() %>%
+  all_supplies <- water_supplies |>
+    sf::st_drop_geometry() |>
     dplyr::select(wsd_source_id, park_unit, park_name, source_type,
-                  well_depth) %>%
-    dplyr::mutate(well_depth = as.numeric(well_depth)) %>%
+                  well_depth) |>
+    dplyr::mutate(well_depth = as.numeric(well_depth)) |>
     dplyr::distinct(wsd_source_id, .keep_all = TRUE)
 
   # Join modeled water table depth, then prefer the WSD's recorded well depth
   # (ground truth), assumed to sit 20% shallower than the well bottom, over
   # the modeled WTD.
 
-  results <- all_supplies %>%
+  results <- all_supplies |>
     dplyr::left_join(
-      groundwater_data %>% dplyr::select(wsd_source_id, wtd_point_m),
+      groundwater_data |> dplyr::select(wsd_source_id, wtd_point_m),
       by = "wsd_source_id"
-    ) %>%
+    ) |>
     dplyr::mutate(
       is_gw_spring = grepl("groundwater|spring", source_type),
       well_depth_m = dplyr::if_else((well_depth * 0.8 * 0.3048) >= 200, 200, (well_depth * 0.8 * 0.3048)),
@@ -136,13 +136,13 @@ calc_groundwater_depth_sensitivity <- function(water_supplies,
         !is.na(wtd_point_m)        ~ "modeled_wtd",
         .default = NA_character_
       )
-    ) %>%
+    ) |>
     dplyr::select(-source_type, -well_depth, -is_gw_spring,
                   -well_depth_m, -wtd_point_m)
 
   # Bin the raw depth into a DRASTIC-style sensitivity score, then standardize
   # both the raw depth and the bin score separately
-  final_results <- results %>%
+  final_results <- results |>
     dplyr::mutate(raw_groundwater_depth_bin = dplyr::case_when(
       dplyr::between(raw_groundwater_depth_m, 0, 1.5) ~ 1,
       dplyr::between(raw_groundwater_depth_m, 1.5, 4.5) ~ .9,
@@ -152,8 +152,8 @@ calc_groundwater_depth_sensitivity <- function(water_supplies,
       dplyr::between(raw_groundwater_depth_m, 22.9, 30.5) ~ .2,
       raw_groundwater_depth_m >= 30.5 ~ .1,
       .default = NA
-    )) %>%
-    add_standardized_indicators("raw_groundwater_depth_m", invert = TRUE) %>%
+    )) |>
+    add_standardized_indicators("raw_groundwater_depth_m", invert = TRUE) |>
     add_standardized_indicators("raw_groundwater_depth_bin", invert = FALSE)
 
   # Save results

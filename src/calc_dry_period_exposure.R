@@ -144,8 +144,8 @@ calc_dry_period_exposure <- function(
 
   ws_ids <- unique(water_supplies$wsd_source_id)
 
-  annual_data <- period_ds %>%
-    dplyr::select(dplyr::all_of(required_cols)) %>%
+  annual_data <- period_ds |>
+    dplyr::select(dplyr::all_of(required_cols)) |>
     dplyr::filter(
       wsd_source_id %in% ws_ids,
       (
@@ -158,8 +158,8 @@ calc_dry_period_exposure <- function(
             year >= future_start_year &
             year <= future_end_year
         )
-    ) %>%
-    dplyr::collect() %>%
+    ) |>
+    dplyr::collect() |>
     data.table::as.data.table()
 
   if (!nrow(annual_data)) {
@@ -260,13 +260,13 @@ calc_dry_period_exposure <- function(
     by = .(wsd_source_id, park_unit)
   ]
 
-  final_results <- summary_dt %>%
+  final_results <- summary_dt |>
     # Longer projected dry spells indicate greater exposure. Standardize only
     # percent change so the parallel absolute-day fields are not double-counted.
-    add_standardized_indicators("raw_cdd_percent_change_p") %>%
+    add_standardized_indicators("raw_cdd_percent_change_p") |>
     add_standardized_indicators(
       "raw_cdd_change_models_showing_increase"
-    ) %>%
+    ) |>
     dplyr::select(wsd_source_id, park_unit, dplyr::everything())
 
   if (save) {

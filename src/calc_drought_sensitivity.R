@@ -195,14 +195,14 @@ calc_drought_sensitivity <- function(water_supplies,
   # ---------------------------------------------------------------------------
   
   process_historical_var <- function(file, value_col) {
-    dt <- arrow::open_dataset(file, format = "parquet") %>%
-      dplyr::select(wsd_source_id, park_unit, date, value) %>%
+    dt <- arrow::open_dataset(file, format = "parquet") |>
+      dplyr::select(wsd_source_id, park_unit, date, value) |>
       dplyr::filter(
         wsd_source_id %in% ws_ids,
         date >= as.character(hist_input_start_month),
         date <= as.character(hist_report_end_month)
-      ) %>%
-      dplyr::collect() %>%
+      ) |>
+      dplyr::collect() |>
       data.table::as.data.table()
     
     if (!nrow(dt)) {
@@ -425,14 +425,14 @@ calc_drought_sensitivity <- function(water_supplies,
     by = .(wsd_source_id, park_unit, year)
   ]
   
-  trend_results <- annual_spei %>%
-    dplyr::as_tibble() %>%
-    dplyr::arrange(wsd_source_id, year) %>%
-    dplyr::group_by(wsd_source_id, park_unit) %>%
+  trend_results <- annual_spei |>
+    dplyr::as_tibble() |>
+    dplyr::arrange(wsd_source_id, year) |>
+    dplyr::group_by(wsd_source_id, park_unit) |>
     dplyr::summarize(
       data = list(dplyr::pick(dplyr::everything())),
       .groups = "drop"
-    ) %>%
+    ) |>
     dplyr::mutate(
       n_years = purrr::map_int(data, ~ sum(!is.na(.x$annual_mean_spei))),
       sen = purrr::map(data, ~ {
@@ -456,8 +456,8 @@ calc_drought_sensitivity <- function(water_supplies,
         ~ if (is.null(.x)) NA_real_ else .x$p.value
       ),
       mk_significant = mk_p_value < 0.05
-    ) %>%
-    dplyr::select(-data, -sen, -mk, -mk_tau, -mk_p_value) %>%
+    ) |>
+    dplyr::select(-data, -sen, -mk, -mk_tau, -mk_p_value) |>
     dplyr::mutate(
       trend_direction = dplyr::case_when(
         is.na(raw_slope_spei) ~ NA_character_,
@@ -467,16 +467,16 @@ calc_drought_sensitivity <- function(water_supplies,
       )
     )
   
-  final_results <- trend_results %>%
+  final_results <- trend_results |>
     dplyr::left_join(
       dplyr::as_tibble(monthly_summary),
       by = c("wsd_source_id", "park_unit")
-    ) %>%
+    ) |>
     # Lower SPEI slopes indicate increasing drought sensitivity.
-    add_standardized_indicators("raw_slope_spei", invert = TRUE) %>%
+    add_standardized_indicators("raw_slope_spei", invert = TRUE) |>
     # Higher drought frequency and severity indicate greater sensitivity.
-    add_standardized_indicators("raw_drought_month_frequency") %>%
-    add_standardized_indicators("raw_avg_drought_severity") %>%
+    add_standardized_indicators("raw_drought_month_frequency") |>
+    add_standardized_indicators("raw_avg_drought_severity") |>
     dplyr::select(wsd_source_id, park_unit, dplyr::everything())
   
   if (save) {

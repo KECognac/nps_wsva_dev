@@ -258,17 +258,17 @@ process_drought_data <- function(water_supplies,
       }
       
       # Read only the truly required columns. 
-      dt <- arrow::open_dataset(f, format = "parquet") %>%
+      dt <- arrow::open_dataset(f, format = "parquet") |>
         dplyr::select(wsd_source_id,
                       date,
                       value,
-                      park_unit) %>%
+                      park_unit) |>
         dplyr::filter(wsd_source_id %in% ws_ids,
                       date >= as.character(overall_start),
-                      date <= as.character(overall_end)) %>%
-        dplyr::collect() %>%
-        data.table::as.data.table() %>%
-        .[, date := data.table::as.IDate(date)]
+                      date <= as.character(overall_end)) |>
+        dplyr::collect() |>
+        data.table::as.data.table() |>
+        _[, date := data.table::as.IDate(date)]
       
       if (!nrow(dt)) {
         out[[i]] <- NULL
