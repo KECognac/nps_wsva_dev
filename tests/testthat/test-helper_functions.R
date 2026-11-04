@@ -1,3 +1,6 @@
+# This repo has no DESCRIPTION to set the testthat edition, so set it here.
+testthat::local_edition(3)
+
 test_that("add_standardized_indicators() adds norm_ and rank_ columns", {
   dat <- tibble::tibble(id = 1:4, raw_a = c(10, 20, 30, 40))
   out <- add_standardized_indicators(dat, prefix = "raw_a")

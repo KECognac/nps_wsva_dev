@@ -9,6 +9,11 @@
 # changed since the golden run (R, packages, the data it reads, and any live
 # download), to help find the cause.
 
+# This repo has no DESCRIPTION to set the testthat edition, so set it here.
+# Under edition 2, expect_identical() is base identical(), which fails on a fresh
+# data.table against a saved one because of its internal pointer.
+testthat::local_edition(3)
+
 source(test_path("fixtures", "golden_cases.R"), local = TRUE)
 
 golden_dir <- test_path("fixtures", "golden")
