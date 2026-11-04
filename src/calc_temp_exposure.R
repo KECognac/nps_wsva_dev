@@ -78,8 +78,7 @@
 #' @export
 #' @seealso [calc_temp_sensitivity()] for the historical trend;
 #'   [process_loca2_mwbm()], which makes the input files (`var =
-#'   "tasmin_tavg"` and `"tasmax_tavg"`);
-#'   [calc_vulnerability_index()].
+#'   "tasmin_tavg"` and `"tasmax_tavg"`).
 #' @examplesIf interactive() && dir.exists(npswavacore::wava_data_path("rapid", "inputs", "loca2_temperature_water_supplies"))
 #' # Reads the processed temperature files for both periods (several GB),
 #' # so it takes several minutes even for one park

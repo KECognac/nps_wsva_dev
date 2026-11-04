@@ -9,15 +9,10 @@
 # nps_water_vulnerability when the rapid code was split out (2026-10-20). The golden
 # files always come from that commit, whatever the playground clone is on, so
 # later changes to the playground don't move the baseline. The script extracts
-# that commit's setup.R, src/ and rapid_app/calc_vulnerability_index.R into a
-# temporary folder (`git archive`; the clone itself is not touched), links the
-# playground's `data` folder into it, and sources setup.R there as the old
-# workflow did (about 70 packages plus every file in src/).
-#
-# It then sources rapid_app/calc_vulnerability_index.R. This repo's
-# calc_vulnerability_index() and minmax_norm() came from that file (the app's
-# version), not from the older src/rapid/calc_vulnerability_index.R that
-# setup.R sources. Nothing else in the old src/ calls minmax_norm().
+# that commit's setup.R and src/ into a temporary folder (`git archive`; the
+# clone itself is not touched), links the playground's `data` folder into it,
+# and sources setup.R there as the old workflow did (about 70 packages plus
+# every file in src/).
 #
 # Next it makes the inputs in golden_cases.R (the water supplies from the old
 # get_wsd(), and so on) and saves them to golden/inputs.rds, which test-golden.R
@@ -37,7 +32,6 @@
 # the team agreed); never to make a failing test pass.
 
 golden_commit <- "b62f366"
-index_file <- file.path("rapid_app", "calc_vulnerability_index.R")
 
 args <- commandArgs(trailingOnly = TRUE)
 old_repo <- normalizePath(
@@ -68,7 +62,7 @@ old_code <- file.path(tempfile("golden_"), "nps_water_vulnerability")
 dir.create(old_code, recursive = TRUE)
 archive <- tempfile(fileext = ".tar")
 git("archive", "--format=tar", "-o", shQuote(archive), golden_commit,
-    "setup.R", "src", index_file)
+    "setup.R", "src")
 utils::untar(archive, exdir = old_code)
 file.symlink(normalizePath(file.path(old_repo, "data")),
              file.path(old_code, "data"))
@@ -79,7 +73,6 @@ dir.create(out_dir)
 
 setwd(old_code)
 source("setup.R")
-source(index_file)
 
 # Paths built with golden_data_path() resolve to the same `data` link
 options(wava.data_dir = normalizePath("data"))
@@ -93,17 +86,12 @@ options(wava.data_dir = normalizePath("data"))
 Sys.setlocale("LC_COLLATE", "C")
 options(arrow.use_threads = FALSE)
 
-# make_fake_supplies(), for the index inputs
-source(file.path(fixtures, "..", "helper-fixtures.R"))
 source(file.path(fixtures, "golden_cases.R"))
 
 info <- c(
   paste("Written:", format(Sys.time(), "%Y-%m-%d %H:%M %Z")),
   paste("Old code: nps_water_vulnerability", golden_commit_full,
-        "(pinned; setup.R, src/ and", index_file,
-        "extracted from that commit)"),
-  paste("calc_vulnerability_index() and minmax_norm() from", index_file,
-        "(sourced after setup.R)"),
+        "(pinned; setup.R and src/ extracted from that commit)"),
   paste("Playground clone was on:", clone_head, "(not used for the code)"),
   paste("Data folder:", normalizePath("data")),
   paste("Run settings: LC_COLLATE =", Sys.getlocale("LC_COLLATE"),

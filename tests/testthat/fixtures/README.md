@@ -8,18 +8,9 @@
 We chose one commit of the playground as the reference: `b62f366`, its
 `upstream/main` when the rapid code was split out (2026-10-20). The golden files
 always come from that commit, even after the playground changes.
-`make_golden.R` extracts `setup.R`, `src/` and
-`rapid_app/calc_vulnerability_index.R` from that commit with `git archive`,
-whatever the local clone is on. The commit is set in one place,
+`make_golden.R` extracts `setup.R` and `src/` from that commit with
+`git archive`, whatever the local clone is on. The commit is set in one place,
 `golden_commit` at the top of `make_golden.R`.
-
-The vulnerability index has two old versions at that commit. This repo's
-`calc_vulnerability_index()` and `minmax_norm()` came from the app's
-version, `rapid_app/calc_vulnerability_index.R`, the same file as in
-`nps_wsva_app`. `src/rapid/calc_vulnerability_index.R` is an older version
-(it has an `id_cols` argument). `setup.R` sources it, so `make_golden.R`
-sources the app's file afterwards. Nothing else in the old `src/` calls
-`minmax_norm()`.
 
 This is a temporary arrangement for checking the move out of the playground.
 Once development has moved off the playground, `b62f366` stops being the
@@ -38,10 +29,8 @@ The setup is copied from wavadeepdive's golden tests (which added `reads` and
   scripts use.
   - **Inputs** (`golden_inputs`): the 8 water supplies the cases run on,
     with their buffered and inundation-scenario versions, the pyromes and
-    fire probabilities, and the synthetic tables for the index (from
-    `make_fake_supplies()` in `helper-fixtures.R`). `make_golden.R` makes
-    them with the old code (the old `get_wsd(rapid = TRUE)`) and saves them
-    to `golden/inputs.rds`; `test-golden.R` reads them from there. So both
+    fire probabilities. `make_golden.R` makes them with the old code (the old
+    `get_wsd(rapid = TRUE)`) and saves them to `golden/inputs.rds`; `test-golden.R` reads them from there. So both
     runs use the identical inputs, and the test doesn't call `get_wsd()`,
     which npswavacore's golden tests cover. The sites are listed, with the
     reason for each, in `golden_site_ids`.

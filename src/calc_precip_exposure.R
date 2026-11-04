@@ -77,8 +77,7 @@
 #' @export
 #' @seealso [calc_precip_sensitivity()] for the historical trend;
 #'   [calc_precip_timing_exposure()] for the change in timing;
-#'   [process_loca2_mwbm()], which makes the input files;
-#'   [calc_vulnerability_index()].
+#'   [process_loca2_mwbm()], which makes the input files.
 #' @examplesIf interactive() && dir.exists(npswavacore::wava_data_path("rapid", "inputs", "loca2_precipitation_water_supplies"))
 #' # Reads the processed precipitation files for both periods (several GB),
 #' # so it takes several minutes even for one park

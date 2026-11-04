@@ -25,15 +25,14 @@ with its commit history. This repo is not an R package.
   - `process_*()`: prepare the input data that some indicators need
   - `add_standardized_indicators()`: adds normalized and ranked columns to an
     indicator table
-  - `calc_vulnerability_index()`: combines the indicators into factors,
-    components and the total index, as the app does
 - `Explore/`: notebooks for checking data processing and indicator outputs
 - `tests/`: unit tests, and golden tests against the code from before the split
 
 ## Getting started
 
-Clone this repo next to `nps_wsva_app`. `app_data_prep.Rmd` and one Explore
-notebook use `../nps_wsva_app/app_data`.
+Clone this repo next to `nps_wsva_app`. `app_data_prep.Rmd` writes to
+`../nps_wsva_app/app_data`. One Explore notebook reads from that folder and
+sources the app's `calc_vulnerability_index.R`.
 
 The Rmds read their inputs from the shared WaVA data folder, which is not in
 this repo. Link it into the repo root as `data`:

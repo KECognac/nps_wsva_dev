@@ -92,17 +92,6 @@ golden_inputs <- list(
     readr::read_csv(golden_data_path("rapid", "inputs",
                                      "fire_probability_change.csv"),
                     show_col_types = FALSE)
-  },
-  # make_fake_supplies() is in helper-fixtures.R. Every source type, since
-  # rainwater and ocean have their own branches in the index.
-  vuln_dat = function(inputs) {
-    make_fake_supplies(8, source_type = c(
-      "deep groundwater", "shallow groundwater", "unknown groundwater",
-      "spring", "river/stream", "lake/reservoir", "rainwater", "ocean"
-    ))
-  },
-  vuln_dat_na = function(inputs) {
-    make_fake_supplies(6, na_cols = c("exp_swi", "sen_flood_risk"))
   }
 )
 
@@ -169,27 +158,12 @@ golden_cases <- local({
 
   list(
     # No data, no internet
-    list(id = "minmax_norm",
-         fun = "minmax_norm",
-         args = list(x = c(3, NA, 7, 1, 7))),
-    list(id = "minmax_norm_keep_na",
-         fun = "minmax_norm",
-         args = list(x = c(3, NA, 7, 1, 7), na.rm = FALSE)),
-    list(id = "minmax_norm_constant",
-         fun = "minmax_norm",
-         args = list(x = c(2, 2, NA))),
     list(id = "add_standardized_indicators",
          fun = "add_standardized_indicators",
          args = list(data = raw_table, prefix = "raw_")),
     list(id = "add_standardized_indicators_invert",
          fun = "add_standardized_indicators",
          args = list(data = raw_table, prefix = "raw_", invert = TRUE)),
-    list(id = "calc_vulnerability_index",
-         fun = "calc_vulnerability_index",
-         args = function(inputs) list(dat = inputs$vuln_dat)),
-    list(id = "calc_vulnerability_index_na_cols",
-         fun = "calc_vulnerability_index",
-         args = function(inputs) list(dat = inputs$vuln_dat_na)),
 
     # Saved inputs only
     list(id = "calc_fire_exposure",

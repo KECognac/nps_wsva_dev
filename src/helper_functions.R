@@ -32,8 +32,6 @@
 #' @return `data` with a `norm_*` and a `rank_*` column added after the
 #'   existing columns for each matching column.
 #' @export
-#' @seealso [minmax_norm()], the rescaling used by
-#'   [calc_vulnerability_index()].
 #' @examples
 #' fire <- data.frame(
 #'   wsd_source_id = c("A", "B", "C", "D"),

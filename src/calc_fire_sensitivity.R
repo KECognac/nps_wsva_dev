@@ -50,7 +50,7 @@
 #'   States, version 2023. USDA Forest Service Research Data Archive.
 #' @export
 #' @seealso [calc_fire_exposure()] for the projected change in fire
-#'   probability; [calc_vulnerability_index()].
+#'   probability.
 #' @examplesIf file.exists(npswavacore::wava_data_path("all", "usfs_fire", "whp2023_GeoTIF", "whp2023_cls_conus.tif"))
 #' # 4 km buffers around the water supplies, as in the rapid workflow
 #' ws <- npswavacore::get_wsd(park = "ZION")

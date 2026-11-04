@@ -53,8 +53,8 @@
 #'   `park_unit`, `park_name`, and the `norm_` and `rank_` versions of the
 #'   two `raw_` columns from [add_standardized_indicators()].
 #' @export
-#' @seealso [calc_vulnerability_index()], which uses the percentage as
-#'   `sen_flood_risk`.
+#' @seealso `calc_vulnerability_index()` in `nps_wsva_app`, which uses the
+#'   percentage as `sen_flood_risk`.
 #' @examplesIf interactive()
 #' # Queries the FEMA flood map service, so it needs internet
 #' ws <- npswavacore::get_wsd(park = "ZION")

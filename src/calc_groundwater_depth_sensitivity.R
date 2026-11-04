@@ -64,7 +64,7 @@
 #'   inverted) from [add_standardized_indicators()].
 #' @export
 #' @seealso [process_groundwater_depth()], which makes `wtd_all_sites.csv`;
-#'   [calc_vulnerability_index()], which uses the depth as
+#'   `calc_vulnerability_index()` in `nps_wsva_app`, which uses the depth as
 #'   `sen_source_type`.
 #' @examplesIf file.exists(npswavacore::wava_data_path("rapid", "inputs", "groundwater_depth", "wtd_all_sites.csv"))
 #' ws <- npswavacore::get_wsd(park = "ZION")

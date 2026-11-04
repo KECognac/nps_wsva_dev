@@ -54,8 +54,7 @@
 #'   the conterminous United States. Science of the Total Environment, 789,
 #'   147872.
 #' @export
-#' @seealso [calc_fire_sensitivity()] for current wildfire hazard;
-#'   [calc_vulnerability_index()].
+#' @seealso [calc_fire_sensitivity()] for current wildfire hazard.
 #' @examplesIf file.exists(npswavacore::wava_data_path("rapid", "inputs", "pyromes.gpkg"))
 #' ws <- npswavacore::get_wsd(park = "ZION")
 #' pyromes <- sf::st_read(npswavacore::wava_data_path("rapid", "inputs", "pyromes.gpkg"),

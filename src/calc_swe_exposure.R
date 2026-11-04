@@ -77,8 +77,7 @@
 #' @seealso [calc_swe_sensitivity()] for the historical trend;
 #'   [calc_runoff_exposure()] and [calc_precip_exposure()] for the other
 #'   water supply variables; [process_loca2_mwbm()], which makes the input
-#'   files;
-#'   [calc_vulnerability_index()].
+#'   files.
 #' @examplesIf interactive() && dir.exists(npswavacore::wava_data_path("rapid", "inputs", "loca2_swe_water_supplies"))
 #' # Reads every processed snow file (about 2.5 GB), so it takes several
 #' # minutes even for one park
