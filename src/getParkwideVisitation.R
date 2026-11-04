@@ -7,7 +7,7 @@
 #' 
 #' @return A single dataframe/tibble of visitation statistics for all National Parks.
 #' Dataframe contains visitation numbers for each month of each year.
-getParkwideVisitation <- function(startYear, endYear){
+get_parkwide_visitation <- function(startYear, endYear){
   
   visits <- function(year){
     

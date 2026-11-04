@@ -278,7 +278,7 @@ process_inundation_data <- function(coast_dir_path = npswavacore::wava_data_path
   # tagged as redacted in the NOAA SLRV Data Download URL, but it is still unclear
   # why that is the case.
   
-  # To do this we will use `download_NOAA_inun_slr_tif_data()`:
+  # To do this we will use `download_noaa_inun_slr_tif_data()`:
   
   ### DOWNLOADING NOAA SURFACE INUNDATION TIF DATASETS HELPER FUNCTION ----
   
@@ -287,7 +287,7 @@ process_inundation_data <- function(coast_dir_path = npswavacore::wava_data_path
   # @param tif_url_df df which holds the URLs for inundation surface raster tifs from NOAA SLRV
   # @param save_dir Character path to directory where files should be saved
   
-  download_NOAA_inun_slr_tif_data <- function(tif_url_df,
+  download_noaa_inun_slr_tif_data <- function(tif_url_df,
                                               save_dir = file.path(output_dir, "Extent_Rasters")) {
     tif_url_df |>
       purrr::pwalk(function(url, file, state, ...) {
@@ -329,7 +329,7 @@ process_inundation_data <- function(coast_dir_path = npswavacore::wava_data_path
     dplyr::group_by(inun_region) |>
     dplyr::slice_min(depth_ft)
   
-  download_NOAA_inun_slr_tif_data(tif_url_df = reference_tif_df,
+  download_noaa_inun_slr_tif_data(tif_url_df = reference_tif_df,
                                   save_dir = file.path(output_dir, "Extent_Rasters"))
   
   ## Download the scenario inundation surface datasets ----
@@ -419,7 +419,7 @@ process_inundation_data <- function(coast_dir_path = npswavacore::wava_data_path
     dplyr::left_join(tif_df, by = c("inun_region", "depth_mm")) |>
     tidyr::drop_na(url)
   
-  download_NOAA_inun_slr_tif_data(tif_url_df = download_tif_df,
+  download_noaa_inun_slr_tif_data(tif_url_df = download_tif_df,
                                   save_dir = file.path(output_dir, "Extent_Rasters"))
   
   ## Generate the water supply data with the inundation region information ----

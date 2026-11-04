@@ -2,7 +2,7 @@
 # Run from the repo root. The Rmds read data/... paths, so the repo root needs a
 # `data` link to the shared data folder (see README.md).
 
-packageLoad <-
+package_load <-
   function(x) {
     for (i in 1:length(x)) {
       if (!x[i] %in% installed.packages()) {
@@ -47,7 +47,7 @@ packages <- c(
   "tidyverse"
 )
 
-packageLoad(packages)
+package_load(packages)
 
 # Only called as pkg::fun(), so installed but not attached.
 install_only <- c(

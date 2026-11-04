@@ -71,7 +71,7 @@ water_supplies <- read_excel(table_path,
 Grab visitation across the entire National Park Service so what the trends are like nationally:
 
 ```{r}
-system_visitation <- getParkwideVisitation(startYear = 2010, endYear = 2024) 
+system_visitation <- get_parkwide_visitation(startYear = 2010, endYear = 2024) 
 # for single park instead, use this - 
 # system_visitation <- get_unit_visitation(unit = "MISS", startYear = 2010, endYear = 2024) 
 
