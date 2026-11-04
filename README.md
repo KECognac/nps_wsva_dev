@@ -29,7 +29,6 @@ with its commit history. This repo is not an R package.
     components and the total index, as the app does
 - `Explore/`: notebooks for checking data processing and indicator outputs
 - `tests/`: unit tests, and golden tests against the code from before the split
-- `.claude/agents/`: Claude Code agents for building a new indicator
 
 ## Getting started
 

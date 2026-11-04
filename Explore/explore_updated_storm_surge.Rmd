@@ -221,7 +221,7 @@ new_sensitivity <- calc_storm_surge_sensitivity(
 )
 
 # GRSA_WS_001_01 / GRSA_WS_002_01 are known duplicate wsd_source_id values in
-# the source Excel database (see CLAUDE.md, Known Data Issues); dedupe so
+# the source Excel database; dedupe so
 # downstream joins stay one row per water supply. ncdf4::ncvar_get() also tags
 # values with a leftover "array"/dim attribute that breaks mapview() and
 # case_when(); as.numeric() strips it. Repeat both after every live calc call.
