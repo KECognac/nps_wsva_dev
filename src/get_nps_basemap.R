@@ -1,11 +1,23 @@
+# The Park Tiles access token, from the NPS_BASEMAP_TOKEN environment variable
+nps_basemap_token <- function(){
+  token <- Sys.getenv("NPS_BASEMAP_TOKEN")
+  if (!nzchar(token)) {
+    stop("Set the NPS_BASEMAP_TOKEN environment variable to use the NPS ",
+         "basemaps. See get_nps_basemap.R for where to find the token.",
+         call. = FALSE)
+  }
+  token
+}
+
 #' Download the NPS Park Tiles basemap for an area
 #'
 #' Park Tiles is the National Park Service's own basemap
 #' (https://www.nps.gov/maps/tools/park-tiles/). NPS serves it from its Atlas
-#' tile server; the style IDs and public access token below come from NPS's
-#' map library (npmap.js 4.2.1, the code behind the Park Tiles viewer). If NPS
-#' rotates the token, update `nps_token` from
-#' https://www.nps.gov/lib/npmap.js/4.2.1/npmap.min.js (search "atlas-user").
+#' tile server; the style IDs below come from NPS's map library (npmap.js
+#' 4.2.1, the code behind the Park Tiles viewer). So does the public access
+#' token, which is read from the `NPS_BASEMAP_TOKEN` environment variable. Find
+#' it in https://www.nps.gov/lib/npmap.js/4.2.1/npmap.min.js (search
+#' "atlas-user").
 #'
 #' @param aoi sf object to cover, e.g. from `get_park_boundary()`.
 #' @param style `"standard"`, `"light"` or `"slate"`.
@@ -18,7 +30,7 @@ get_nps_basemap <- function(aoi, style = "standard", buffer_km = 2, zoom = NULL)
   style_ids <- c(standard = "ck58pyquo009v01p99xebegr9",
                  light = "ck5cpia2u0auf01p9vbugvcpv",
                  slate = "ck5cpvc2e0avf01p9zaw4co8o")
-  nps_token <- Sys.getenv("NPS_BASEMAP_TOKEN")
+  nps_token <- nps_basemap_token()
 
   # maptiles detects the image type from ".png" in the URL. The server rejects
   # extra query parameters, so ".png" goes in a URL fragment, which curl never
@@ -78,7 +90,7 @@ add_nps_basemaps <- function(m, styles = c("standard", "light", "slate", "imager
                  light = "ck5cpia2u0auf01p9vbugvcpv",
                  slate = "ck5cpvc2e0avf01p9zaw4co8o",
                  imagery = "ck72fwp2642dv07o7tbqinvz4")
-  nps_token <- Sys.getenv("NPS_BASEMAP_TOKEN")
+  nps_token <- nps_basemap_token()
 
   lm <- if (inherits(m, "mapview")) m@map else m
 

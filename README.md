@@ -58,6 +58,11 @@ for the data folder in this order: `options(wava.data_dir = ...)`, the
 `WAVA_DATA_DIR` environment variable, then `data` in the working directory.
 Every input and output path is also an argument.
 
+The NPS basemap functions in `src/get_nps_basemap.R`, used by
+`Explore/explore_nearby_use_versions.Rmd`, read NPS's public Park Tiles token from
+the `NPS_BASEMAP_TOKEN` environment variable. That file says where to find it. Set
+it in `~/.Renviron`.
+
 Two packages are needed only by `Explore/explore_temperature_visitation_exposure.Rmd`,
 and `setup.R` doesn't install them:
 [`npswava`](https://github.com/Water-Vulnerability-Analytics/npswava) and
