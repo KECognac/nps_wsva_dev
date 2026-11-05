@@ -1,0 +1,351 @@
+---
+title: "rapid_data_processing"
+output: html_document
+---
+
+# Pre-processing datasets for Rapid workflow
+
+This workflow includes importing and organizing of datasets for the rapid workflow to allow for quick re-runs of the rapid reports and a cleaner workflow.
+
+```{r}
+source("setup.R")
+
+water_supplies <- get_wsd(rapid = TRUE)
+```
+
+# Create File Structure
+
+Create folders if they don't already exist
+
+```{r}
+if(!dir.exists("data/rapid")) {
+  dir.create("data/rapid")
+}
+
+# folder for park-level data
+if(!dir.exists("data/rapid/park")) {
+  dir.create("data/rapid/park")
+}
+
+# folders for each park code
+walk(sort(parks$UNIT_CODE), function(x){
+  if(!dir.exists(paste0("data/rapid/park", x))) {
+    dir.create(paste0("data/rapid/park", x))
+  }
+})
+
+# folder for conus or US wide data
+if(!dir.exists("data/rapid/all")) {
+  dir.create("data/rapid/all")
+}
+
+# folder for indicators input datasets
+if(!dir.exists("data/rapid/inputs")) {
+  dir.create("data/rapid/inputs")
+}
+
+# folder for indicator output datasets
+if(!dir.exists("data/rapid/outputs")) {
+  dir.create("data/rapid/outputs")
+}
+
+# folder for coastal component input datasets
+if(!dir.exists("data/rapid/inputs/coast_comp")) {
+  dir.create("data/rapid/inputs/coast_comp")
+}
+
+
+```
+
+# Fire Probability Data
+
+Combine all Gao et al. files and save final file to feed into `calc_fire_exposure()`
+
+```{r}
+# read in input datasets
+pyromes <- st_read("data/all/usfs_fire/Pyromes-RDS-2020-0020/Data/Pyromes_CONUS_20200206.shp") |>
+  st_make_valid() |>
+  sf::st_transform(4326)
+
+
+# GAO 2021 FIRE PROBABILITY
+crosswalk <- read_csv("data/all/usfs_fire/fire_projections_gao_2021/gcm_crosswalk.csv")
+
+# Back-casted GCMs, compared against GridMet. Really just need GridMet.
+fireprob_historic <- read_csv("data/all/usfs_fire/fire_projections_gao_2021/tables3-fireprob-hist.csv")
+
+# Midcentury is defined as the avg. across 2040-2070:
+delta_fireprob <- read_csv("data/all/usfs_fire/fire_projections_gao_2021/tables12-45-midcentury.csv") |>
+  pivot_longer(-PYROME, names_to = "gao") |>
+  left_join(crosswalk, by = "gao") |>
+  mutate(GCM = paste0(GCM, ".rcp45")) |>
+  # do same thing on the 85 CFs, then bind together:
+  bind_rows(
+    read_csv(
+      "data/all/usfs_fire/fire_projections_gao_2021/tables6-85-midcentury.csv"
+    ) |>
+      tidyr::pivot_longer(-PYROME, names_to = "gao", values_to = "value") |>
+      left_join(crosswalk, by = "gao") |>
+      mutate(GCM = paste0(GCM, ".rcp85"))
+  ) |>
+  # join historic data by pyrome:
+  left_join(fireprob_historic, by = "PYROME") |>
+  # Description: "The probability of a fire increases/decreases by `delta_fp` percent."
+  #mutate(delta_fp = 100 * ((value - GridMet)/GridMet))
+  # new method, pulling each model's specific hind cast value instead of Gridmet
+  rowwise() |>
+  # No historic value for NorESM1 so using ensemble mean for that one
+  mutate(delta_fp = 100 * ((value - get(
+    ifelse(gao == "NorESM1", "ensemblemean", gao)
+  )) / get(
+    ifelse(gao == "NorESM1", "ensemblemean", gao)
+  ))) |>
+  ungroup() |> 
+  select(PYROME, GCM, delta_fp)
+
+```
+
+Save files
+
+```{r}
+write_csv(delta_fireprob, "data/rapid/inputs/fire_probability_change.csv")
+
+st_write(pyromes, "data/rapid/inputs/pyromes.gpkg", append = FALSE)
+```
+
+# Process LOCA2 Files
+
+### Air Temperature
+
+```{r}
+temperature_data <- list.files("data/all/loca2_mwbm/", full.names = TRUE, pattern = "tasmin|tasmax|lusu|temperature|temp")
+
+walk(temperature_data, ~ {
+  if (grepl("tasmin", .x, ignore.case = TRUE)) {
+    process_loca2_mwbm(nc_path = .x,
+                       water_supplies = water_supplies,
+                       var = "tasmin_tavg",
+                       grab_nearest = TRUE,
+                       historical = c("1979-10-01", "2024-12-31"),
+                       future = c("2034-10-01", "2100-12-31"),
+                       output_dir = "data/rapid/inputs/loca2_temperature_water_supplies/")
+  }
+  
+  if (grepl("tasmax", .x, ignore.case = TRUE)) {
+    process_loca2_mwbm(nc_path = .x,
+                       water_supplies = water_supplies,
+                       var = "tasmax_tavg",
+                       grab_nearest = TRUE,
+                       historical = c("1979-10-01", "2024-12-31"),
+                       future = c("2034-10-01", "2100-12-31"),
+                       output_dir = "data/rapid/inputs/loca2_temperature_water_supplies/")
+  }
+})
+```
+
+### Runoff
+
+```{r}
+runoff_data <- list.files("data/all/loca2_mwbm/", full.names = TRUE, pattern = "*runoff")
+
+# Process all NetCDF files using helper function
+walk(runoff_data, ~process_loca2_mwbm(.x,
+                                      output_dir = "data/rapid/inputs/loca2_runoff_water_supplies/",
+                                      water_supplies = water_supplies |> select(park_unit, wsd_source_id),
+                                      var = "runoff",
+                                      grab_nearest = TRUE,
+                                      historical = c("1979-01-01", "2014-12-31"),
+                                      future = c("2015-01-01", "2100-12-31")))
+
+# took 24 minutes
+```
+
+### Precipitation
+
+```{r}
+precip_data <- grep("livneh", list.files("data/all/loca2_mwbm/", full.names = TRUE, pattern = "pr_|precip|pr."), value = TRUE, invert = TRUE)
+
+# Process all NetCDF files using helper function
+walk(precip_data, ~try(process_loca2_mwbm(.x,
+                                          output_dir = "data/rapid/inputs/loca2_precipitation_water_supplies/",
+                                          water_supplies = water_supplies |> select(park_unit, wsd_source_id),
+                                          var = "pr",
+                                          grab_nearest = TRUE,
+                                          historical = c("1979-01-01", "2014-12-31"),
+                                          future = c("2015-01-01", "2100-12-31"))))
+
+# took 57 minutes
+```
+
+### Consecutive Dry and Wet Periods
+
+Extract the annual maximum consecutive dry-day (CDD) and wet-day (CWD) spell
+lengths from the revised LOCA2 precipitation-extremes dataset.
+
+```{r}
+precip_period_data <- list.files("data/all/loca_cmip6_precip_products/",
+                                 full.names = TRUE,
+                                 recursive = TRUE,
+                                 pattern = "\\.nc$")
+
+walk(precip_period_data, ~ process_precip_period_data(nc_path = .x,
+                                                      water_supplies = water_supplies |>
+                                                        select(park_unit, wsd_source_id),
+                                                      output_dir = "data/rapid/inputs/loca_cmip6_precip_periods_water_supplies/",
+                                                      overwrite = FALSE,
+                                                      verbose = TRUE))
+```
+
+### Snow Water Equivalent
+
+```{r}
+snow_data <- grep("livneh", list.files("data/all/loca2_mwbm/", full.names = TRUE, pattern = "snow"), value = TRUE, invert = TRUE)
+
+# Process all NetCDF files using helper function
+walk(snow_data, ~process_loca2_mwbm(.x,
+                                    output_dir = "data/rapid/inputs/loca2_swe_water_supplies/",
+                                    water_supplies = water_supplies |> select(park_unit, wsd_source_id),
+                                    var = "swe",
+                                    grab_nearest = TRUE,
+                                    historical = c("1979-01-01", "2014-12-31"),
+                                    future = c("2015-01-01", "2100-12-31")))
+
+# took 57 minutes
+```
+
+### PET
+
+```{r}
+pet_data <- list.files("data/all/loca2_mwbm/", full.names = TRUE, pattern = "pet_")
+
+# Process all NetCDF files using helper function
+walk(pet_data, ~process_loca2_mwbm(.x,
+                                   output_dir = "data/rapid/inputs/loca2_pet_water_supplies/",
+                                   water_supplies = water_supplies |> select(park_unit, wsd_source_id),
+                                   var = "pet",
+                                   grab_nearest = TRUE,
+                                   historical = c("1979-01-01", "2014-12-31"),
+                                   future = c("2015-01-01", "2100-12-31")))
+
+# took 24 minutes
+```
+
+### Actual Evapotranspiration
+
+```{r}
+aet_data <- list.files("data/all/loca2_mwbm/",
+                       full.names = TRUE,
+                       pattern = "aet_MWBM")
+
+walk(aet_data, ~process_loca2_mwbm(.x,
+                                   output_dir = "data/rapid/inputs/loca2_aet_water_supplies/",
+                                   water_supplies = water_supplies |> select(park_unit, wsd_source_id),
+                                   var = "aet",
+                                   grab_nearest = TRUE,
+                                   historical = c("1979-01-01", "2014-12-31"),
+                                   future = c("2015-01-01", "2100-12-31")))
+```
+
+### Soil-Water Storage
+
+```{r}
+stor_data <- list.files("data/all/loca2_mwbm/",
+                        full.names = TRUE,
+                        pattern = "stor_MWBM")
+
+walk(stor_data, ~process_loca2_mwbm(.x,
+                                    output_dir = "data/rapid/inputs/loca2_stor_water_supplies/",
+                                    water_supplies = water_supplies |> select(park_unit, wsd_source_id),
+                                    var = "stor",
+                                    grab_nearest = TRUE,
+                                    historical = c("1979-01-01", "2014-12-31"),
+                                    future = c("2015-01-01", "2100-12-31")))
+```
+
+### Drought Data
+
+Aggregates the gridded data above to single monthly value for each water supply for SPEI drought calculations.
+
+```{r}
+process_drought_data(water_supplies,
+                     precip_data = "data/rapid/inputs/loca2_precipitation_water_supplies/",
+                     pet_data = "data/rapid/inputs/loca2_pet_water_supplies/",
+                     hindcast = TRUE,
+                     historical = c("1979", "2014"),
+                     future = c("2015", "2065"),
+                     water_year = TRUE,
+                     output_dir = "data/rapid/inputs/",
+                     verbose = TRUE)
+
+```
+
+# Process Coastal Site's Geometries
+
+```{r}
+process_coastal_geometry(
+  water_supplies = water_supplies,
+  cusp_dir_path = here("data", "all", "coast_comp_data", "NOAA_CUSP"),
+  ncpu = 6,
+  max_coast_dist_m = 50000,
+  save = TRUE,
+  output_dir = here("data", "rapid", "inputs", "coast_comp"),
+  verbose = TRUE
+)
+```
+
+# Process Sea Level Rise Inundation Data
+
+```{r}
+inundation_data <- process_inundation_data(
+  coast_dir_path = here("data", "all", "coast_comp_data"), 
+  water_supplies = water_supplies, 
+  save           = TRUE, 
+  output_dir     = here("data", "rapid", "inputs", "coast_comp"))
+# took under 5 minutes
+```
+
+# Process Saltwater Intrusion Data
+
+```{r}
+process_swi_data(
+  data_path  = here("data", "all", "coast_comp_data", "adams_swi_2024", "data", "output_data.txt"),
+  save       = TRUE,
+  output_dir = here("data", "rapid", "inputs", "swi")
+)
+```
+
+# Process Storm Surge Exposure Data
+
+```{r}
+process_storm_surge_data(data_dir = here("data", "all", "coast_comp_data", "storm_surge_muis_2023_RP10"),
+                         save = TRUE,
+                         output_dir = here("data", "rapid", "inputs", "storm_surge"))
+```
+
+# Process Groundwater Depth Data
+
+Extracts modeled water table depth at each water supply point from the CONUS-wide 
+RF groundwater depth model (Zenodo 18504963), read from the local copy downloaded 
+to `data/all/groundwater_sensitivity/`.
+
+```{r}
+process_groundwater_depth(water_supplies = water_supplies,
+                          save = TRUE,
+                          output_dir = "data/rapid/inputs/groundwater_depth/")
+```
+
+
+# Process Water Rights Indicator Data [Aqueduct V4.0]
+
+```{r}
+process_waterrightsindicator_data(
+  water_supplies,
+  gdb_path   = here("data", "all", "aqueduct_v4",
+                    "Aqueduct40_waterrisk_download_Y2023M07D05", "GDB",
+                    "Aq40_Y2023D07M05.gdb"),
+  save_intermediate = TRUE,
+  save       = TRUE,
+  output_dir = here("data", "rapid", "inputs", "WaterRightsIndicator"),
+  verbose    = TRUE) 
+```
+

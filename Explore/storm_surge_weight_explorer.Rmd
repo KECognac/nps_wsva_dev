@@ -1,0 +1,154 @@
+---
+title: "Storm Surge Weight Explorer (Dummy Data)"
+output:
+  html_document:
+    self_contained: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+
+library(tidyverse)
+library(plotly)
+library(ambient)
+
+set.seed(42)
+```
+
+## Methods
+
+The storm surge sensitivity weight reflects joint proximity to the coast and low
+elevation, such that a water supply must be *both* near the coast *and* at low
+elevation to receive a high weight. A point that is close to the coast but sits
+high on a bluff, or one that is low-lying but far inland, receives a lower weight
+than a point that is both low and close to shore.
+
+$$
+w = \sqrt{\frac{d_{inv}^2 + e_{inv}^2}{2}}
+$$
+
+where $d_{inv} = 1 - (distance / max\_distance)$ and $e_{inv} = 1 - (elevation / max\_elevation)$,
+both normalized to $[0, 1]$, and $max\_distance$ and $max\_elevation$ are the
+observed maxima in the dataset.
+
+## Terrain Generation
+
+```{r terrain-generation}
+nx <- 150
+ny <- 150
+
+x_seq <- seq(0, 1, length.out = nx)
+y_seq <- seq(0, 1, length.out = ny)
+
+# layered perlin noise: low-frequency hills, medium-frequency ridges, high-frequency roughness
+base_layer  <- noise_perlin(dim = c(nx, ny), frequency = 2,  octaves = 1)
+ridge_layer <- noise_perlin(dim = c(nx, ny), frequency = 6,  octaves = 1)
+rough_layer <- noise_perlin(dim = c(nx, ny), frequency = 20, octaves = 1)
+
+raw_elevation <- base_layer * 1.00 + ridge_layer * 0.35 + rough_layer * 0.10
+
+elev_rescaled <- scales::rescale(raw_elevation, to = c(0, 400))
+
+# coastal gradient: x = 0 (west edge) is the coast, forced low; rises inland
+coast_ramp   <- x_seq^0.6
+elev_coastal <- sweep(elev_rescaled, 1, coast_ramp, `*`)
+
+# coastal bluff: sharp elevation rise near the coast within a mid-coast band
+sigmoid <- function(x, center, steepness) 1 / (1 + exp(-steepness * (x - center)))
+
+cliff_band  <- y_seq >= 0.35 & y_seq <= 0.65
+cliff_boost <- sigmoid(x_seq, center = 0.15, steepness = 40) * 250
+
+elev_final <- elev_coastal
+elev_final[, cliff_band] <- sweep(elev_final[, cliff_band, drop = FALSE], 1, cliff_boost, `+`)
+elev_final[elev_final < 0] <- 0
+
+terrain_df <- expand.grid(x = x_seq, y = y_seq) %>%
+  as_tibble() %>%
+  mutate(elevation = as.vector(elev_final))
+```
+
+## Water Supply Points
+
+```{r water-supply-points}
+n_pts <- 20
+px_seq <- seq(0, 1, length.out = n_pts)
+py_seq <- seq(0, 1, length.out = n_pts)
+
+points <- expand.grid(x = px_seq, y = py_seq) %>%
+  as_tibble() %>%
+  mutate(
+    xi = map_dbl(x, ~ which.min(abs(x_seq - .x))),
+    yi = map_dbl(y, ~ which.min(abs(y_seq - .x))),
+    elevation = elev_final[cbind(xi, yi)]
+  ) %>%
+  select(x, y, elevation) %>%
+  mutate(distance_km = x * 50)
+```
+
+## Weighting Factor
+
+```{r weighting-factor}
+max_elev <- max(points$elevation)
+max_dist <- max(points$distance_km)
+
+points <- points %>%
+  mutate(
+    elev_inv = 1 - (elevation / max_elev),
+    dist_inv = 1 - (distance_km / max_dist),
+    weight   = sqrt((dist_inv^2 + elev_inv^2) / 2),
+    hover_text = paste0(
+      "Elevation: ", round(elevation, 1), " m<br>",
+      "Distance to coast: ", round(distance_km, 1), " km<br>",
+      "Weight: ", round(weight, 3)
+    )
+  )
+```
+
+## 3D Visualization
+
+```{r visualization}
+# plotly surface convention: z[row, col] plots at (x[col], y[row]) -> transpose
+surface_z <- t(elev_final)
+
+fig <- plot_ly() %>%
+  add_trace(
+    x = x_seq, y = y_seq, z = surface_z,
+    type = "surface",
+    colorscale = "Earth",
+    opacity = 0.85,
+    hoverinfo = "none",
+    showscale = TRUE,
+    colorbar = list(title = "Elevation (m)", x = 1.02, y = 1, yanchor = "top", len = 0.4)
+  ) %>%
+  add_trace(
+    data = points,
+    x = ~x, y = ~y, z = ~elevation,
+    type = "scatter3d",
+    mode = "markers",
+    marker = list(
+      color = ~weight,
+      colorscale = list(c(0, "green"), c(0.5, "yellow"), c(1, "red")),
+      cmin = 0,
+      cmax = 1,
+      size = ~(4 + weight * 10),
+      colorbar = list(title = "Storm Surge Weight", x = 1.02, y = 0.55, yanchor = "top", len = 0.4)
+    ),
+    text = ~hover_text,
+    hoverinfo = "text"
+  ) %>%
+  layout(
+    title = "Storm Surge Sensitivity Weight Explorer",
+    scene = list(
+      xaxis = list(title = "Distance from Coast (normalized)"),
+      yaxis = list(title = "Along-coast position"),
+      zaxis = list(title = "Elevation (m)"),
+      camera = list(eye = list(x = 1.8, y = -1.8, z = 0.8))
+    ),
+    showlegend = FALSE,
+    margin = list(r = 150),
+    height = 700
+  )
+
+fig
+```

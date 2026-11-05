@@ -1,8 +1,8 @@
 # Cases for the golden comparison between the old code in
-# nps_water_vulnerability (before the split) and wavarapid.
+# nps_water_vulnerability (before the split) and src/ in this repo.
 #
 # Used by make_golden.R, which writes golden/<id>.rds from the old code, and by
-# test-golden.R, which checks that wavarapid returns the identical object.
+# test-golden.R, which checks that src/ returns the identical object.
 # Each case has these fields:
 # `id`: the golden file name.
 # `fun`: the function to call, by name.
@@ -27,11 +27,11 @@
 # Paths in the shared data folder, for arguments with no default. make_golden.R
 # sets options(wava.data_dir) to the old code's `data` link, so both runs read
 # the same files.
-golden_data_path <- function(...) wavacore::wava_data_path(...)
+golden_data_path <- function(...) npswavacore::wava_data_path(...)
 
 # The folder a case that writes files writes into, inside tempdir(). Nothing
 # else may be written (see golden_run()).
-golden_out_dir <- function(id) file.path(tempdir(), "wavarapid_golden", id)
+golden_out_dir <- function(id) file.path(tempdir(), "nps_wsva_dev_golden", id)
 
 # Every parquet file a case wrote, by file name, for its `keep`
 golden_read_parquet <- function(id) {
@@ -55,7 +55,7 @@ golden_site_ids <- c(
 
 # Inputs, made once by make_golden.R with the OLD code and saved in
 # golden/inputs.rds; test-golden.R reads them from there. So both runs get the
-# identical objects, and the test doesn't call get_wsd() (wavacore's golden
+# identical objects, and the test doesn't call get_wsd() (npswavacore's golden
 # tests cover it). Each one is a function of the inputs made before it.
 golden_inputs <- list(
   # Every rapid water supply. The water rights functions need all of them:
@@ -92,17 +92,6 @@ golden_inputs <- list(
     readr::read_csv(golden_data_path("rapid", "inputs",
                                      "fire_probability_change.csv"),
                     show_col_types = FALSE)
-  },
-  # make_fake_supplies() is in helper-fixtures.R. Every source type, since
-  # rainwater and ocean have their own branches in the index.
-  vuln_dat = function(inputs) {
-    make_fake_supplies(8, source_type = c(
-      "deep groundwater", "shallow groundwater", "unknown groundwater",
-      "spring", "river/stream", "lake/reservoir", "rainwater", "ocean"
-    ))
-  },
-  vuln_dat_na = function(inputs) {
-    make_fake_supplies(6, na_cols = c("exp_swi", "sen_flood_risk"))
   }
 )
 
@@ -169,27 +158,12 @@ golden_cases <- local({
 
   list(
     # No data, no internet
-    list(id = "minmax_norm",
-         fun = "minmax_norm",
-         args = list(x = c(3, NA, 7, 1, 7))),
-    list(id = "minmax_norm_keep_na",
-         fun = "minmax_norm",
-         args = list(x = c(3, NA, 7, 1, 7), na.rm = FALSE)),
-    list(id = "minmax_norm_constant",
-         fun = "minmax_norm",
-         args = list(x = c(2, 2, NA))),
     list(id = "add_standardized_indicators",
          fun = "add_standardized_indicators",
          args = list(data = raw_table, prefix = "raw_")),
     list(id = "add_standardized_indicators_invert",
          fun = "add_standardized_indicators",
          args = list(data = raw_table, prefix = "raw_", invert = TRUE)),
-    list(id = "calc_vulnerability_index",
-         fun = "calc_vulnerability_index",
-         args = function(inputs) list(dat = inputs$vuln_dat)),
-    list(id = "calc_vulnerability_index_na_cols",
-         fun = "calc_vulnerability_index",
-         args = function(inputs) list(dat = inputs$vuln_dat_na)),
 
     # Saved inputs only
     list(id = "calc_fire_exposure",
@@ -528,7 +502,7 @@ golden_cases <- local({
 
 # Run one case: build its arguments, make sure it can only write into
 # golden_out_dir(id), call it, and apply its `keep`. Used by make_golden.R
-# (old code) and test-golden.R (wavarapid).
+# (old code) and test-golden.R (src/).
 golden_run <- function(case, inputs) {
   args <- if (is.function(case$args)) case$args(inputs) else case$args
   # A process_* function writes unless save = FALSE (their defaults write into

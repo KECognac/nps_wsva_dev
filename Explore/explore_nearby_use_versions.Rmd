@@ -1,0 +1,358 @@
+---
+title: "Nearby water use: old vs. new"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+# Run from the project root regardless of RStudio's knit-directory setting.
+knitr::opts_knit$set(root.dir = here::here())
+source("setup.R")
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE,
+                      fig.width = 7, fig.height = 5, dpi = 150)
+theme_set(theme_minimal(base_size = 12))
+
+# Use NPS Park Tiles and the same 0-1 color scale for each comparison.
+norm_map <- function(data, column, label) {
+  mapview(data, zcol = column, layer.name = label, map.types = NULL,
+          at = seq(0, 1, by = .2), col.regions = hcl.colors(100, "YlOrRd")) %>%
+    add_nps_basemaps()
+}
+```
+
+**Nearby-use exposure** measures future minus historical county withdrawals per
+square kilometre (MGD/km2), representing change in surrounding demand pressure.
+Higher values indicate larger increases; decreases retain negative raw values.
+
+- **Old:** USGS/RPA withdrawals across six sectors; 2035–2065 minus the 1985–2015
+average. P10/P50/P90 select the ensemble member nearest each percentile.
+- **New:** Public supply, irrigation and thermoelectric withdrawals; 2040–2070
+minus the 2000–2020 baseline. P10/P50/P90 report the model/pathway pair nearest
+each absolute-change percentile; SSP1-2.6 is excluded.
+
+Both use full 2020 TIGER/Line counties through `tigris`.
+
+The two versions are not successive editions of one dataset. They are separate
+studies that estimate county water use in fundamentally different ways, which is
+why their results diverge as much as they do.
+
+| | Old (Warziniack et al., 2022) | New (Blumberg and Warziniack) |
+|---|---|---|
+| Sectors | Six: domestic, industrial and mining, thermoelectric, irrigated agriculture, livestock, aquaculture | Three: public supply, crop irrigation, thermoelectric (~90% of US withdrawals) |
+| Method | Structural accounting: each sector is a driver (population, income, irrigated acres, electricity generated) multiplied by a withdrawal rate (gallons per person, per dollar, per acre) | Reduced-form econometric panel on 2000–2020 observed withdrawals, with county-month and state-year fixed effects and county-specific time trends |
+| Climate input | CMIP5 via MACA, 5 models x 4 SSP-RCP core scenarios (AR5 convention) | CMIP6, 7 models x 3 SSPs (SSP2-4.5, SSP3-7.0, SSP5-8.5), 21 members after dropping SSP1-2.6 |
+| Time resolution | Annual | Monthly, so seasonal climate response is estimated separately for each calendar month |
+| Thermoelectric | Sector-level, driven by projected electricity generation | Plant-level, with cooling-type specific responses and climate averaged over transmission-constraint annuli (50–250 km) |
+| Energy transition | Not represented | 24 states' clean-energy targets zero out coal and gas plants by their target dates; plants with no 2018–2020 withdrawals are treated as retired |
+| Adaptation | Withdrawal rates follow assumed efficiency trajectories | Captured empirically by county time trends, with scenarios that relax them |
+
+Three of these differences do most of the work. The **sector change** removes
+livestock, aquaculture, and industrial and mining, so the new version is not
+measuring the same quantity: counties whose demand is dominated by a dropped
+sector shift position substantially. The **method change** replaces an accounting
+identity with historically revealed climate responses, so the new estimates carry
+observed behaviour and adaptation rather than assumed rates. The **energy
+transition assumptions** are new, and they pull thermoelectric demand down
+sharply (the paper reports -27.9% to -19.9% nationally) in exactly the counties
+where the old version projected growing power-sector demand.
+
+Those assumptions are worth stating plainly, because they are policy
+projections rather than climate responses: the new estimates presume all 24
+states meet their clean-energy targets. A county that loses its power plant
+registers as a large decrease in nearby demand, which is a real reduction in
+competition for water but one contingent on that policy outcome.
+
+For both nearby-use versions and WTA exposure, signed absolute change is used
+because percent change can exaggerate small changes when the baseline is low
+and is undefined at a zero baseline. Percent change remains available for context;
+the plots scale absolute changes to 0–1 after calculating county withdrawal
+change per area or dimensionless WTA ratio change.
+
+```{r calculate, include=FALSE}
+sites <- get_wsd(rapid = TRUE)
+
+water_supplies <- sites %>%
+  select(wsd_source_id, park_unit, park_name, source_longitude, source_latitude) %>%
+  st_as_sf(coords = c("source_longitude", "source_latitude"), crs = 4326, na.fail = FALSE)
+
+observed <- data.table::fread("data/all/RPAWaterDemand/1_BaseData/Trash 2022/usgswithdrawals.csv")
+
+future <- data.table::fread("data/all/RPAWaterDemand/2_Demand_Results/cons_and_withdrawal.csv",
+                            select = c("fips", "yearr", "scenario", "withdrawal"))
+
+old <- calc_nearby_use_exposure_old(water_supplies, observed, future, verbose = FALSE) %>%
+  st_drop_geometry() %>%
+  transmute(wsd_source_id, fips = if_else(is.na(fips), NA_character_, sprintf("%05d", as.integer(fips))),
+            p90 = norm_absolute_use_change_p90, raw_p90 = raw_absolute_use_change_p90,
+            data_status = NA_character_)
+
+old_future_fips <- future %>% filter(between(yearr, 2035, 2065)) %>%
+  distinct(fips) %>% pull(fips) %>% as.integer() %>% sprintf(fmt = "%05d")
+
+rm(future)
+
+new <- calc_nearby_use_exposure(water_supplies, verbose = FALSE) %>%
+  transmute(wsd_source_id, fips, p90 = norm_absolute_use_change_p90,
+            raw_p90 = raw_absolute_use_change_p90, data_status)
+
+new_future_fips <- data.table::fread(
+  "data/Latest county-level data/water_demand_projections/pub_irr_monthly_avg_2040_2070.csv",
+  select = "FIPS") %>% distinct(FIPS) %>% pull(FIPS) %>% as.integer() %>% sprintf(fmt = "%05d")
+
+pairs <- inner_join(old, new, by = "wsd_source_id", suffix = c("_old", "_new")) %>%
+  filter(is.finite(p90_old), is.finite(p90_new)) %>%
+  # Each version is min-max normalized over its own set of supplies, and a few
+  # extreme old values squeeze the rest into a narrow band, so the normalized
+  # scores are not comparable point-for-point. Rank the raw changes within the
+  # shared set of supplies instead.
+  mutate(rank_old = percent_rank(raw_p90_old), rank_new = percent_rank(raw_p90_new))
+
+# Agreement between versions. Spearman is unaffected by min-max scaling.
+agreement <- list(
+  pearson = cor(pairs$p90_old, pairs$p90_new),
+  spearman = cor(pairs$p90_old, pairs$p90_new, method = "spearman"),
+  same_sign = mean(sign(pairs$raw_p90_old) == sign(pairs$raw_p90_new)),
+  old_range = range(pairs$raw_p90_old),
+  new_range = range(pairs$raw_p90_new),
+  # How badly the old extremes compress the old normalized scale, and whether
+  # ranking changes the sign of the apparent relationship.
+  old_middle90 = unname(quantile(pairs$p90_old, c(.05, .95))),
+  pearson_rank = cor(pairs$rank_old, pairs$rank_new))
+
+wta <- calc_wta_exposure(water_supplies, huc_level = 8L, verbose = FALSE) %>%
+  select(wsd_source_id, huc, raw_wta_change_p90, norm_wta_change_p90)
+wta_distribution <- wta %>%
+  distinct(huc, raw_wta_change_p90, norm_wta_change_p90) %>%
+  filter(is.finite(norm_wta_change_p90))
+wta_range <- range(wta_distribution$raw_wta_change_p90)
+wta_middle <- quantile(wta_distribution$norm_wta_change_p90, c(.05, .95))
+wta_zero <- scales::rescale(0, from = wta_range)
+waterrights <- calc_waterrights_exposure(
+  water_supplies,
+  stress_data = here("data", "rapid", "inputs", "WaterRightsIndicator",
+                     "waterrights_stress_long.csv"),
+  period = "2050", verbose = FALSE) %>%
+  select(wsd_source_id, norm_water_stress_2050)
+
+map_data <- water_supplies %>%
+  left_join(pairs %>% select(wsd_source_id, p90_old, p90_new), by = "wsd_source_id")
+wta_rights_map_data <- water_supplies %>%
+  left_join(wta, by = "wsd_source_id") %>%
+  left_join(waterrights, by = "wsd_source_id")
+```
+
+```{r missing-sites, include=FALSE}
+# Classify why each supply has no result.
+missing_sites <- function(results, future_fips) {
+  results %>%
+    filter(!is.finite(p90)) %>%
+    left_join(select(sites, wsd_source_id, park_name, water_system_name), by = "wsd_source_id") %>%
+    arrange(park_name, water_system_name, wsd_source_id) %>%
+    transmute(Park = park_name, `Water system` = water_system_name,
+              `Source ID` = wsd_source_id, `County FIPS` = fips,
+              Gap = case_when(is.na(fips) ~ "No county FIPS match",
+                              !fips %in% future_fips ~ "County absent from future file",
+                              !is.na(data_status) ~ str_to_sentence(gsub("_", " ", data_status)),
+                              TRUE ~ "Unavailable result"))
+}
+missing_new <- missing_sites(new, new_future_fips)
+missing_old <- missing_sites(old, old_future_fips)
+
+missing_both <- missing_new %>% filter(`Source ID` %in% missing_old$`Source ID`)
+missing_new_only <- missing_new %>% filter(!`Source ID` %in% missing_old$`Source ID`)
+missing_old_only <- missing_old %>% filter(!`Source ID` %in% missing_new$`Source ID`)
+
+historical_new_fips <- data.table::fread(
+  "data/Latest county-level data/water_demand_projections/pub_irr_monthly_avg_2000_2020.csv",
+  select = "FIPS") %>%
+  transmute(FIPS = sprintf("%05d", as.integer(FIPS))) %>%
+  distinct()
+future_new_fips <- data.table::fread(
+  "data/Latest county-level data/water_demand_projections/pub_irr_monthly_avg_2040_2070.csv",
+  select = "FIPS") %>%
+  transmute(FIPS = sprintf("%05d", as.integer(FIPS))) %>%
+  distinct()
+missing_county_fips <- anti_join(historical_new_fips, future_new_fips, by = "FIPS")
+
+missing_counties <- tigris::counties(cb = FALSE, year = 2020, progress_bar = FALSE) %>%
+  mutate(FIPS = GEOID) %>%
+  filter(FIPS %in% missing_county_fips$FIPS) %>%
+  mutate(coverage = "Historical only")
+```
+
+### Supplies without results
+
+`r nrow(missing_new)` supplies have no new nearby-use exposure result and
+`r nrow(missing_old)` have no old result. `r nrow(missing_both)` are missing
+from both versions, in `r n_distinct(missing_both$"County FIPS")` counties whose
+codes are absent from the future file in both datasets. `r nrow(missing_new_only)`
+are missing only from the new version, in
+`r n_distinct(missing_new_only$"County FIPS")` counties with incomplete future
+thermoelectric plant records (a known plant has no projection, so the future
+total is unavailable rather than assumed zero). `r nrow(missing_old_only)` are
+missing only from the old version.
+
+```{r missing-sites-table}
+knitr::kable(missing_new)
+```
+
+The plot compares the two versions by percentile rank of
+`raw_absolute_use_change_p90`: signed withdrawal change per county area, ranked
+within the supplies that have both results. Ranking rather than plotting the
+normalized scores keeps the comparison honest. Each version is min-max scaled
+over its own set of supplies, and a handful of extreme old values pin the ends
+of the old scale: 90% of old normalized scores fall between
+`r round(agreement$old_middle90[1], 2)` and `r round(agreement$old_middle90[2], 2)`,
+a span of just `r round(diff(agreement$old_middle90), 2)` of the 0–1 range.
+Plotted that way the points form a tight vertical band that reflects the scaling
+rather than the relationship. Each point is a supply with both results; the
+dashed line marks equal rank.
+
+```{r}
+ggplotly(ggplot(pairs, aes(rank_old, rank_new)) +
+  geom_abline(slope = 1, intercept = 0, linetype = 2, color = "grey55") +
+  geom_point(alpha = .45, color = "#2166AC") +
+  coord_equal(xlim = c(0, 1), ylim = c(0, 1)) +
+  # ggplotly drops subtitles, so the supply count goes in the title.
+  labs(title = paste0("Percentile rank of P90 change in county withdrawals (",
+                      nrow(pairs), " supplies with both results)"),
+       x = "Old: percentile rank", y = "New: percentile rank"))
+```
+
+### Spatial comparison
+
+The maps below show where the two versions disagree. Given the differences set
+out above, the disagreement is expected rather than a sign that one version is
+wrong: the versions cover different sectors, estimate demand by different means,
+and make different assumptions about the power sector. Weak agreement is the
+result of comparing two genuinely different estimates of county water use, not
+of a processing error in either.
+
+The two versions agree only weakly. Across the `r nrow(pairs)` supplies with
+both results, the rank (Spearman) correlation of P90 change is
+`r round(agreement$spearman, 2)`, and both versions show the same direction of
+change for `r scales::percent(agreement$same_sign)` of supplies. The Pearson
+correlation of the normalized scores is `r round(agreement$pearson, 2)`, pulled
+down by a few extreme old values: old raw P90 change ranges from
+`r signif(agreement$old_range[1], 2)` to `r signif(agreement$old_range[2], 2)`
+MGD/km2, versus `r signif(agreement$new_range[1], 2)` to
+`r signif(agreement$new_range[2], 2)` for the new version. Those extremes are
+also why the rank plot above is the fair comparison, and the reason matters:
+the Pearson correlation of the normalized scores is negative while the rank
+correlation is positive (`r round(agreement$pearson_rank, 2)`). A plot of
+normalized scores would therefore suggest the two versions run in opposite
+directions, when in fact they agree weakly but positively. Ranked, the points
+spread across the square along a loose diagonal, which is the agreement the
+Spearman correlation actually reports.
+
+The synchronized maps share the same 0–1 color scale.
+
+```{r nearby-use-maps}
+m_old <- norm_map(map_data %>% filter(is.finite(p90_old)), "p90_old",
+                  "Old nearby use P90 (normalized)")
+m_new <- norm_map(map_data %>% filter(is.finite(p90_new)), "p90_new",
+                  "New nearby use P90 (normalized)")
+leafsync::sync(m_old, m_new, ncol = 2)
+```
+
+Both the original and new water-use datasets have inconsistent county coverage
+between their historical and future files. Many counties that appear in the 
+historical data, especially Virginia counties and independent cities, are missing
+from the future projections, while the original dataset also contains some 
+future-only county codes. This suggests a county FIPS or county-equivalent 
+crosswalk problem during data preparation rather than a true absence of water 
+use. Because the missing counties cannot be matched confidently across periods,
+their future changes are flagged as unavailable instead of being treated as zero.
+
+```{r wta-coverage-gap, include=FALSE}
+# The same historical-vs-future coverage mismatch, at HUC8 in the WTA files.
+wta_dir <- "data/Latest county-level data/water_demand_projections"
+wta_hist_huc <- data.table::fread(file.path(wta_dir, "wta_ratios_2000_2020.csv"),
+                                  select = c("huc", "agg")) %>%
+  filter(agg == "HUC08") %>% distinct(huc) %>% pull(huc)
+wta_future_huc <- data.table::fread(file.path(wta_dir, "wta_ratios_2040_2070.csv"),
+                                    select = c("huc", "agg")) %>%
+  filter(agg == "HUC08") %>% distinct(huc) %>% pull(huc)
+wta_gap_huc <- setdiff(wta_hist_huc, wta_future_huc)
+wta_gap_sites <- wta %>% filter(!is.finite(raw_wta_change_p90))
+```
+
+The WTA ratios carry the same kind of gap one level up. Of the
+`r length(wta_hist_huc)` HUC8 watersheds in the historical file,
+`r length(wta_gap_huc)` (`r paste(wta_gap_huc, collapse = ", ")`) is absent from
+the projections, leaving `r nrow(wta_gap_sites)` supplies without a WTA exposure
+result. WTA sensitivity is unaffected, since it reads only the historical file.
+As with the counties above, the gap is treated as unavailable rather than as no
+change. It is worth noting alongside the county gaps because both originate in
+the same upstream dataset: a spatial unit present in the baseline and missing
+from the future projections, rather than a genuine absence of water use.
+
+The first map shows every supply without a new result, colored by the reason,
+with county boundaries within 200 km. The second shows all historical counties
+absent from the new future projection file.
+
+```{r missing-sites-map}
+missing_site_points <- sites %>%
+  select(wsd_source_id) %>%
+  inner_join(select(missing_new, wsd_source_id = `Source ID`, Gap), by = "wsd_source_id")
+
+site_buf <- missing_site_points %>%
+  st_transform(5070) %>%
+  st_buffer(200000)
+
+counties <- tigris::counties(cb = TRUE, progress_bar = FALSE) %>%
+  st_transform(st_crs(site_buf)) %>%
+  filter(lengths(st_intersects(., site_buf)) > 0)
+
+add_nps_basemaps(
+  mapview(missing_site_points, zcol = "Gap", layer.name = "Supplies without a new result",
+          map.types = NULL) +
+    mapview(counties, layer.name = "Counties", alpha.regions = 0, map.types = NULL))
+```
+
+```{r missing-county-map}
+mapview(missing_counties,
+        map.types = NULL,
+        zcol = "coverage",
+        layer.name = "Historical counties absent from future file",
+        col.regions = "#D73027",
+        alpha.regions = 0.6,
+        color = "white") %>%
+  add_nps_basemaps()
+```
+
+### WTA and water-rights exposure
+
+**WTA exposure** measures change in the withdrawal-to-modeled-runoff ratio from
+2000–2020 to 2040–2070 at HUC8, using the actual ensemble member nearest P90;
+SSP1-2.6 is excluded. Higher values indicate greater worsening of water stress.
+
+**WTA sensitivity** is the historical 2000–2020 HUC8 ratio, with higher values
+indicating greater existing stress. It has one historical value per watershed,
+so no percentile is selected; sensitivity is not plotted here.
+
+**Water-rights exposure** is the highest projected 2050 Aqueduct stress score
+across pathways at HydroBASINS Level 6. These maps share a 0–1 color scale but
+compare projected stress level with WTA's change in stress.
+
+```{r wta-water-rights-map}
+m_wta <- norm_map(wta_rights_map_data %>% filter(is.finite(norm_wta_change_p90)),
+                  "norm_wta_change_p90", "HUC8 WTA P90 change (normalized)")
+m_rights <- norm_map(wta_rights_map_data %>% filter(is.finite(norm_water_stress_2050)),
+                     "norm_water_stress_2050", "Water rights 2050 (normalized)")
+leafsync::sync(m_wta, m_rights, ncol = 2)
+```
+
+Min–max normalization scales the raw P90 WTA changes from `r round(wta_range[1], 2)`
+to `r round(wta_range[2], 2)` into 0–1. The extremes compress most scores:
+90% of represented HUC8 values lie between `r round(wta_middle[1], 3)` and
+`r round(wta_middle[2], 3)`. The histogram counts each HUC8 once; its dashed line
+marks zero raw change (normalized `r round(wta_zero, 3)`).
+
+```{r wta-histogram}
+ggplot(wta_distribution, aes(norm_wta_change_p90)) +
+  geom_histogram(binwidth = .02, boundary = 0, fill = "#2166AC", color = "white") +
+  geom_vline(xintercept = wta_zero, linetype = 2) +
+  coord_cartesian(xlim = c(0, 1)) +
+  labs(title = "Distribution of normalized P90 WTA change",
+       x = "Normalized HUC8 P90 WTA change", y = "HUC8 watersheds")
+```

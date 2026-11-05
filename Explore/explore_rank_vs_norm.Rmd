@@ -1,0 +1,307 @@
+---
+title: "Comparing Normalized vs Ranked Fire Indicator Values"
+author: "Your Name"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: united
+    code_folding: show
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, fig.width = 10, fig.height = 6)
+```
+
+# Overview
+
+This analysis compares normalized and ranked values for fire indicators, showing how park ordering changes between the two scaling methods. Each park is colored uniquely to track individual changes in ranking.
+
+## Load Libraries and Data
+
+```{r load-libraries}
+library(tidyverse)
+library(ggplot2)
+library(plotly)
+library(knitr)
+library(DT)
+
+# Load data
+fire_exposure <- read_csv("data/rapid/all/fire_exposure_2025-09-09.csv")
+fire_sensitivity <- read_csv("data/rapid/all/fire_sensitivity_2025-09-09.csv")
+```
+
+# Fire Exposure Analysis (P50)
+
+## Data Preparation
+
+```{r exposure-prep}
+# Prepare fire exposure comparison data
+exposure_comparison <- fire_exposure %>%
+  select(park_name, norm_fire_prob_change_p50, rank_fire_prob_change_p50) %>%
+  filter(!is.na(norm_fire_prob_change_p50) & !is.na(rank_fire_prob_change_p50)) %>%
+  mutate(
+    norm_order = rank(norm_fire_prob_change_p50),
+    rank_order = rank(rank_fire_prob_change_p50),
+    order_difference = norm_order - rank_order,
+    park_short = str_trunc(park_name, 30),  # Shorten names for readability
+    abs_order_diff = abs(order_difference)
+  )
+
+cat("Fire Exposure Dataset:")
+cat("\nParks analyzed:", nrow(exposure_comparison))
+cat("\nMean absolute order change:", round(mean(exposure_comparison$abs_order_diff), 2))
+cat("\nMax order change:", max(exposure_comparison$abs_order_diff))
+```
+
+## Value Comparison Plots
+
+```{r exposure-value-plots}
+# Scatter plot: Normalized vs Ranked values
+p1 <- ggplot(exposure_comparison, aes(x = norm_fire_prob_change_p50, y = rank_fire_prob_change_p50, 
+                                     color = park_name, text = park_name)) +
+  geom_point(alpha = 0.7, size = 2) +
+  geom_smooth(method = "lm", se = FALSE, color = "black", linetype = "dashed", alpha = 0.7) +
+  labs(
+    title = "Fire Exposure: Normalized vs Ranked Values (P50)",
+    x = "Normalized Fire Probability Change",
+    y = "Ranked Fire Probability Change",
+    subtitle = "Each point is a park - dashed line shows linear relationship"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none")  # Hide legend due to too many parks
+
+print(p1)
+
+# Calculate and display correlation
+exposure_correlation <- cor(exposure_comparison$norm_fire_prob_change_p50, 
+                           exposure_comparison$rank_fire_prob_change_p50)
+cat("\nCorrelation between normalized and ranked values:", round(exposure_correlation, 4))
+```
+
+## Order Comparison Plot
+
+```{r exposure-order-plots}
+# Order comparison plot
+p2 <- ggplot(exposure_comparison, aes(x = norm_order, y = rank_order, 
+                                     color = park_name, text = park_name)) +
+  geom_point(alpha = 0.7, size = 2) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "black", alpha = 0.7) +
+  labs(
+    title = "Fire Exposure: Park Ordering - Normalized vs Ranked",
+    x = "Order by Normalized Values (1 = lowest risk)",
+    y = "Order by Ranked Values (1 = lowest risk)",
+    subtitle = "Points on diagonal = same order; distance from line = order change"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+print(p2)
+```
+
+## Parks with Biggest Order Changes
+
+```{r exposure-order-changes}
+# Show parks with biggest order changes
+biggest_changes_exposure <- exposure_comparison %>%
+  arrange(desc(abs_order_diff)) %>%
+  select(park_name, norm_fire_prob_change_p50, rank_fire_prob_change_p50, 
+         norm_order, rank_order, order_difference) %>%
+  slice_head(n = 15)
+
+kable(biggest_changes_exposure, 
+      caption = "Top 15 Parks with Biggest Order Changes (Fire Exposure P50)",
+      digits = 3)
+```
+
+# Fire Sensitivity Analysis
+
+## Data Preparation
+
+```{r sensitivity-prep}
+# Prepare fire sensitivity comparison data
+sensitivity_comparison <- fire_sensitivity %>%
+  select(park_name, norm_wildfire_hazard_mean, rank_wildfire_hazard_mean) %>%
+  filter(!is.na(norm_wildfire_hazard_mean) & !is.na(rank_wildfire_hazard_mean)) %>%
+  mutate(
+    norm_order = rank(norm_wildfire_hazard_mean),
+    rank_order = rank(rank_wildfire_hazard_mean),
+    order_difference = norm_order - rank_order,
+    park_short = str_trunc(park_name, 30),
+    abs_order_diff = abs(order_difference)
+  )
+
+cat("Fire Sensitivity Dataset:")
+cat("\nParks analyzed:", nrow(sensitivity_comparison))
+cat("\nMean absolute order change:", round(mean(sensitivity_comparison$abs_order_diff), 2))
+cat("\nMax order change:", max(sensitivity_comparison$abs_order_diff))
+```
+
+## Value Comparison Plots
+
+```{r sensitivity-value-plots}
+# Scatter plot: Normalized vs Ranked values
+p3 <- ggplot(sensitivity_comparison, aes(x = norm_wildfire_hazard_mean, y = rank_wildfire_hazard_mean, 
+                                        color = park_name, text = park_name)) +
+  geom_point(alpha = 0.7, size = 2) +
+  geom_smooth(method = "lm", se = FALSE, color = "black", linetype = "dashed", alpha = 0.7) +
+  labs(
+    title = "Fire Sensitivity: Normalized vs Ranked Values",
+    x = "Normalized Wildfire Hazard",
+    y = "Ranked Wildfire Hazard",
+    subtitle = "Each point is a park - dashed line shows linear relationship"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+print(p3)
+
+# Calculate and display correlation
+sensitivity_correlation <- cor(sensitivity_comparison$norm_wildfire_hazard_mean, 
+                              sensitivity_comparison$rank_wildfire_hazard_mean)
+cat("\nCorrelation between normalized and ranked values:", round(sensitivity_correlation, 4))
+```
+
+## Order Comparison Plot
+
+```{r sensitivity-order-plots}
+# Order comparison plot
+p4 <- ggplot(sensitivity_comparison, aes(x = norm_order, y = rank_order, 
+                                        color = park_name, text = park_name)) +
+  geom_point(alpha = 0.7, size = 2) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "black", alpha = 0.7) +
+  labs(
+    title = "Fire Sensitivity: Park Ordering - Normalized vs Ranked",
+    x = "Order by Normalized Values (1 = lowest sensitivity)",
+    y = "Order by Ranked Values (1 = lowest sensitivity)",
+    subtitle = "Points on diagonal = same order; distance from line = order change"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+print(p4)
+```
+
+## Parks with Biggest Order Changes
+
+```{r sensitivity-order-changes}
+# Show parks with biggest order changes for sensitivity
+biggest_changes_sensitivity <- sensitivity_comparison %>%
+  arrange(desc(abs_order_diff)) %>%
+  select(park_name, norm_wildfire_hazard_mean, rank_wildfire_hazard_mean, 
+         norm_order, rank_order, order_difference) %>%
+  slice_head(n = 15)
+
+kable(biggest_changes_sensitivity, 
+      caption = "Top 15 Parks with Biggest Order Changes (Fire Sensitivity)",
+      digits = 3)
+```
+
+# Interactive Plots (Optional)
+
+```{r interactive-plots, eval=FALSE}
+# Uncomment and set eval=TRUE to create interactive plots with park name hover labels
+
+# Fire Exposure Interactive Plots
+interactive_p1 <- ggplotly(p1, tooltip = "text") %>%
+  layout(title = list(text = "Fire Exposure: Normalized vs Ranked Values (P50)<br><sub>Hover over points to see park names</sub>"))
+
+interactive_p2 <- ggplotly(p2, tooltip = "text") %>%
+  layout(title = list(text = "Fire Exposure: Park Ordering - Normalized vs Ranked<br><sub>Hover over points to see park names</sub>"))
+
+# Fire Sensitivity Interactive Plots
+interactive_p3 <- ggplotly(p3, tooltip = "text") %>%
+  layout(title = list(text = "Fire Sensitivity: Normalized vs Ranked Values<br><sub>Hover over points to see park names</sub>"))
+
+interactive_p4 <- ggplotly(p4, tooltip = "text") %>%
+  layout(title = list(text = "Fire Sensitivity: Park Ordering - Normalized vs Ranked<br><sub>Hover over points to see park names</sub>"))
+
+# Display interactive plots
+interactive_p1
+interactive_p2
+interactive_p3
+interactive_p4
+```
+
+# Summary Statistics
+
+```{r summary-stats}
+# Create summary comparison table
+summary_comparison <- data.frame(
+  Indicator = c("Fire Exposure P50", "Fire Sensitivity"),
+  Correlation = c(
+    round(exposure_correlation, 4),
+    round(sensitivity_correlation, 4)
+  ),
+  Mean_Abs_Order_Change = c(
+    round(mean(exposure_comparison$abs_order_diff), 2),
+    round(mean(sensitivity_comparison$abs_order_diff), 2)
+  ),
+  Max_Order_Change = c(
+    max(exposure_comparison$abs_order_diff),
+    max(sensitivity_comparison$abs_order_diff)
+  ),
+  Parks_Analyzed = c(
+    nrow(exposure_comparison),
+    nrow(sensitivity_comparison)
+  )
+)
+
+kable(summary_comparison, 
+      caption = "Summary: Normalized vs Ranked Value Comparison",
+      col.names = c("Indicator", "Correlation", "Mean Abs Order Change", 
+                   "Max Order Change", "Parks Analyzed"))
+```
+
+# Key Findings
+
+```{r key-findings}
+cat("KEY FINDINGS:\n\n")
+
+cat("1. CORRELATION STRENGTH:\n")
+cat("   Fire Exposure:", round(exposure_correlation, 4), "\n")
+cat("   Fire Sensitivity:", round(sensitivity_correlation, 4), "\n")
+cat("   (Values closer to 1 indicate more similar rankings)\n\n")
+
+cat("2. AVERAGE ORDER CHANGES:\n")
+cat("   Fire Exposure: Parks change", round(mean(exposure_comparison$abs_order_diff), 1), "positions on average\n")
+cat("   Fire Sensitivity: Parks change", round(mean(sensitivity_comparison$abs_order_diff), 1), "positions on average\n\n")
+
+cat("3. MAXIMUM ORDER CHANGES:\n")
+cat("   Fire Exposure: Some parks change up to", max(exposure_comparison$abs_order_diff), "positions\n")
+cat("   Fire Sensitivity: Some parks change up to", max(sensitivity_comparison$abs_order_diff), "positions\n\n")
+
+if(exposure_correlation < 0.95) {
+  cat("⚠️  RECOMMENDATION: The correlation for fire exposure is below 0.95,\n")
+  cat("   suggesting meaningful differences in park rankings between methods.\n")
+  cat("   Review the parks with large order changes above.\n\n")
+}
+
+if(sensitivity_correlation < 0.95) {
+  cat("⚠️  RECOMMENDATION: The correlation for fire sensitivity is below 0.95,\n")
+  cat("   suggesting meaningful differences in park rankings between methods.\n")
+  cat("   Review the parks with large order changes above.\n\n")
+}
+```
+
+# Interpretation Guide
+
+**How to read the plots:**
+
+- **Value Plots**: Show actual normalized vs ranked values. A straight diagonal line would indicate perfect correlation.
+
+- **Order Plots**: Show how park rankings change between methods. Points on the diagonal have identical rankings in both methods. Points far from the diagonal represent parks that change significantly in ranking.
+
+- **Color Coding**: Each park has a unique color, allowing you to track individual parks across different plots.
+
+- **Order Difference**: Positive values mean the park ranks higher (worse) in the ranking method than in normalized method. Negative values mean the opposite.
+
+**When to be concerned:**
+- Low correlation (< 0.95) suggests the scaling methods produce meaningfully different results
+- Large maximum order changes indicate some parks are substantially re-prioritized
+- Parks appearing in the "biggest changes" tables should be examined individually
+
+---
+
+*Analysis completed on `r Sys.Date()`*

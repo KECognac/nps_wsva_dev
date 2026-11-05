@@ -1,0 +1,195 @@
+---
+title: "Coastal Inundation Relationship Exploration"
+author: "Juan De La Torre"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+editor_options:
+  markdown:
+    wrap: 80
+---
+
+This notebook explores the relationship between reference-scenario inundation
+coverage (`raw_coverage_pct_ref`, the percentage of a water supply's 4 km
+buffer already inundated at current sea level) and distance to the nearest
+NOAA CUSP shoreline (`shore_dist_m`). The goal is to understand whether coastal
+proximity predicts existing inundation extent.
+
+# Establish environment
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, include=FALSE}
+source("setup.R")
+mapviewOptions(fgb = FALSE)
+```
+
+# Load data
+
+## Water supplies
+
+```{r, message=FALSE, echo=FALSE}
+water_supplies <- get_wsd(rapid = TRUE)
+```
+
+## Inundation exposure results
+
+```{r}
+inun_files <- list.files(
+  here("data", "rapid", "outputs"),
+  pattern    = "^inundation_exposure_.*\\.csv$",
+  full.names = TRUE
+)
+
+inundation_exp <- read_csv(inun_files[length(inun_files)], show_col_types = FALSE)
+```
+
+## Coastal weights (distance to shore)
+
+```{r}
+coastal_weights <- read_csv(
+  here("data", "rapid", "inputs", "coast_comp", "coastal_weights.csv"),
+  show_col_types = FALSE
+)
+```
+
+# Join and filter
+
+Filter to 4 km buffer and join distance-to-coast onto inundation results. Water
+supplies more than 50 km from the coast have `shore_dist_m = NA`.
+
+```{r}
+inun_4km <- inundation_exp %>%
+  filter(buffer_km == 4)
+
+ws_joined <- water_supplies %>%
+  inner_join(
+    inun_4km %>% select(-park_unit),
+    by = "wsd_source_id"
+  ) %>%
+  left_join(
+    coastal_weights %>% select(wsd_source_id, shore_dist_m, coastal_weight),
+    by = "wsd_source_id"
+  )
+```
+
+# Maps
+
+## Reference inundation coverage
+
+Higher values (dark blue) indicate a greater proportion of the 4 km buffer is
+already inundated at current sea level. Grey points have no inundation data
+(inland water supplies outside the NOAA SLR domain).
+
+```{r}
+pal_blue <- colorRampPalette(c("white", "steelblue", "darkblue"))
+
+ws_inun <- ws_joined %>% filter(!is.na(raw_coverage_pct_ref))
+ws_no_inun <- ws_joined %>% filter(is.na(raw_coverage_pct_ref))
+
+m_inun <- mapview(ws_inun,
+                  zcol        = "raw_coverage_pct_ref",
+                  col.regions = pal_blue,
+                  layer.name  = "Ref inundation coverage (%)",
+                  popup       = leafpop::popupTable(
+                    sf::st_drop_geometry(ws_inun) %>%
+                      select(wsd_source_id, park_name, water_system_name,
+                             raw_coverage_pct_ref, raw_coverage_pct_proj,
+                             shore_dist_m, inun_change)
+                  ))
+
+if (nrow(ws_no_inun) > 0) {
+  m_inun <- m_inun +
+    mapview(ws_no_inun,
+            col.regions = "grey70",
+            color       = "grey70",
+            layer.name  = "No inundation data",
+            popup       = leafpop::popupTable(
+              sf::st_drop_geometry(ws_no_inun) %>%
+                select(wsd_source_id, park_name, water_system_name, shore_dist_m)
+            ))
+}
+
+m_inun
+```
+
+## Distance to coast
+
+Red = close to the coast, green = near the 50 km boundary, grey = more than
+50 km from coast (no `shore_dist_m` value assigned).
+
+```{r}
+pal_dist <- colorRampPalette(c("red", "yellow", "green"))
+
+ws_coastal <- ws_joined %>% filter(!is.na(shore_dist_m))
+ws_inland  <- ws_joined %>% filter(is.na(shore_dist_m))
+
+m_dist <- mapview(ws_coastal,
+                  zcol        = "shore_dist_m",
+                  col.regions = pal_dist,
+                  layer.name  = "Distance to coast (m)",
+                  popup       = leafpop::popupTable(
+                    sf::st_drop_geometry(ws_coastal) %>%
+                      select(wsd_source_id, park_name, water_system_name,
+                             shore_dist_m, coastal_weight,
+                             raw_coverage_pct_ref, raw_coverage_pct_proj)
+                  ))
+
+if (nrow(ws_inland) > 0) {
+  m_dist <- m_dist +
+    mapview(ws_inland,
+            col.regions = "grey70",
+            color       = "grey70",
+            layer.name  = ">50 km from coast",
+            popup       = leafpop::popupTable(
+              sf::st_drop_geometry(ws_inland) %>%
+                select(wsd_source_id, park_name, water_system_name, raw_coverage_pct_ref)
+            ))
+}
+
+m_dist
+```
+
+# Relationship: reference inundation vs. distance to coast
+
+Scatter plot of reference inundation coverage vs. log distance to coast for
+water supplies within 50 km of the coast. The y-axis is log-transformed to
+spread out the many water supplies clustered near the shoreline. Points are
+colored by `park_name`.
+
+```{r}
+ws_scatter <- ws_joined %>%
+  sf::st_drop_geometry() %>%
+  filter(!is.na(shore_dist_m), !is.na(raw_coverage_pct_ref))
+
+r2 <- summary(lm(log(shore_dist_m) ~ raw_coverage_pct_ref, data = ws_scatter))$r.squared
+
+p <- ggplot(ws_scatter,
+            aes(x     = raw_coverage_pct_ref,
+                y     = log(shore_dist_m),
+                color = park_name,
+                text  = paste0("ID: ", wsd_source_id,
+                               "<br>System: ", water_system_name,
+                               "<br>Park: ", park_name,
+                               "<br>Dist to coast: ", round(shore_dist_m), " m",
+                               "<br>Ref inundation: ", round(raw_coverage_pct_ref, 2), "%"))) +
+  geom_point(alpha = 0.7, size = 2) +
+  geom_smooth(method = "lm", se = FALSE, color = "black", linetype = "dashed",
+              inherit.aes = FALSE,
+              aes(x = raw_coverage_pct_ref, y = log(shore_dist_m))) +
+  annotate("text",
+           x     = max(ws_scatter$raw_coverage_pct_ref) * 0.95,
+           y     = max(log(ws_scatter$shore_dist_m)) * 0.98,
+           label = paste0("R² = ", round(r2, 3)),
+           hjust = 1, vjust = 1, size = 4, color = "black") +
+  labs(x     = "Reference inundation coverage (% of 4 km buffer)",
+       y     = "Log distance to nearest shoreline (m)",
+       color = "Park unit") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+plotly::ggplotly(p, tooltip = "text")
+```
