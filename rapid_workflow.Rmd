@@ -550,6 +550,18 @@ storm_surge_sen <- calc_storm_surge_sensitivity(water_supplies = water_supplies,
                                                 verbose = TRUE)
 ```
 
+
+# System Importance
+
+Not a scored indicator: assigns each water supply an importance category (High, Moderate, Low, Not rated) used to filter or add context to the results. Uses the point `water_supplies`, not the buffer. See `Explore/explore_system_importance.Rmd` for the logic.
+
+```{r}
+system_importance <- calc_system_importance(water_supplies = water_supplies,
+                                            save = TRUE,
+                                            output_dir = "data/rapid/outputs/")
+```
+
+
 # Testing
 
 Filter to Utah parks for testing
