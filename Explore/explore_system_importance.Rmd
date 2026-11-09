@@ -1,0 +1,677 @@
+---
+title: "Water system importance: logic and results"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+---
+
+```{r setup, include=FALSE}
+# Run from the project root regardless of RStudio's knit-directory setting.
+knitr::opts_knit$set(root.dir = here::here())
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+```
+
+```{r calculate, include=FALSE}
+source("setup.R")
+
+water_supplies <- get_wsd(rapid = TRUE)
+all_conus <- get_wsd(conus = TRUE, fill_empty_coords = TRUE)
+
+importance <- calc_system_importance(water_supplies,
+                                     all_water_supplies = all_conus,
+                                     return_details = TRUE)
+
+results <- importance$results
+results_all <- importance$all_sources
+sdwa_inactive <- importance$sdwa_inactive
+rapid_source_ids <- unique(water_supplies$wsd_source_id)
+
+# Settings used by the function, for the text and rule tables below
+list2env(importance$settings, envir = environment())
+
+# Results with source locations, for maps
+system_importance <- water_supplies |>
+  distinct(wsd_source_id, .keep_all = TRUE) |>
+  select(wsd_source_id) |>
+  inner_join(results, by = "wsd_source_id")
+
+# All CONUS sources before inactive ones are removed, used only for the counts in Step 1
+all_conus_sources <- all_conus |>
+  st_drop_geometry() |>
+  distinct(wsd_source_id, .keep_all = TRUE)
+
+park_run_categories <- c("Non-PWS", "Low", "Moderate", "High")
+pws_categories <- c("Low", "Moderate", "High")
+
+busy_parks <- results |>
+  filter(park_visitation_class == "High") |>
+  pull(park_unit) |>
+  unique()
+
+show_table <- function(data, height = NULL, ...) {
+  table <- data |>
+    kable(digits = 1, format.args = list(big.mark = ","), ...) |>
+    kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
+  if (is.null(height)) table else scroll_box(table, height = height)
+}
+
+fmt <- function(x) format(x, big.mark = ",", scientific = FALSE)
+
+category_colors <- c("High" = "#8C2B0E", "Moderate" = "#CB7223", "Low" = "#DFCB34",
+                     "Non-PWS" = "#7FA4C2", "Municipal/purchased" = "#68434E",
+                     "Non-potable" = "#289A84", "Proposed" = "grey60")
+
+importance_colors <- c("High" = "#8C2B0E", "Moderate" = "#CB7223", "Low" = "#DFCB34",
+                       "Not rated" = "grey60")
+
+role_colors <- c("Primary" = "#8C2B0E", "Secondary" = "#CB7223", "Minor" = "#DFCB34",
+                 "Staff only" = "#7FA4C2", "Not park-run" = "grey60")
+
+# Map a column with fixed colors, dropping values that aren't present
+factor_map <- function(data, column, colors, label) {
+  data[[column]] <- droplevels(factor(as.character(data[[column]]), levels = names(colors)))
+  mapview(data, zcol = column, layer.name = label, map.types = NULL,
+          col.regions = unname(colors[levels(data[[column]])])) |>
+    add_nps_basemaps()
+}
+```
+
+## Purpose
+
+This value shows how important each water system is to its park. It isn't scored as a
+rapid indicator, so it isn't normalized. Each source gets one **importance category**
+(High, Moderate, Low, or Not rated) with a reason, used to filter or add context to the
+rapid results.
+
+A park's visitors can't be divided among its water systems reliably. Many visitors use no
+park water, some parks buy most of their water, and SDWA doesn't report a park's share of
+a municipal utility. So the method rates each system on two separate things, then
+combines them with park visitation:
+
+- **Scale:** how many people the system serves, compared with systems everywhere.
+- **Park role:** how central the system is to its own park.
+
+Steps 1 to 7 below explain each piece of the logic in order.
+
+## Final importance by source
+
+```{r final-counts}
+results |>
+  group_by(`Importance category` = importance_category) |>
+  summarize(Sources = n(), Parks = n_distinct(park_unit),
+            `Busy parks` = n_distinct(park_unit[park_visitation_class == "High"])) |>
+  show_table()
+```
+
+```{r final-map}
+factor_map(system_importance, "importance_category", importance_colors, "Importance category")
+```
+
+Every source on the rapid list, sorted by category and then park. Steps 2 to 6 explain
+the scale, role, and visitation columns.
+
+```{r final-table}
+results |>
+  arrange(importance_category, park_unit, water_system_name, wsd_source_id) |>
+  transmute(`Source ID` = wsd_source_id,
+            Park = park_unit,
+            System = water_system_name,
+            `Importance category` = importance_category,
+            Reason = importance_reason,
+            Scale = system_category,
+            Population = population_estimate,
+            `Park role` = park_role,
+            `Park visitation` = park_visitation_class) |>
+  show_table(height = "600px")
+```
+
+## Step 1: Import sources and remove inactive ones
+
+All CONUS sources come from `get_wsd(conus = TRUE, fill_empty_coords = TRUE)`, including
+municipal, purchased, and hauled supplies. Inactive sources are removed before anything
+else is calculated:
+
+- Inactive or temporarily inactive in the WSD. A missing status counts as active.
+- The source's PWS isn't active in SDWA. These are listed under
+  [Data clarification needed](#data-clarification-needed).
+
+```{r step1-counts}
+wsd_inactive <- all_conus_sources |> filter(coalesce(active, "active") != "active")
+
+tibble(
+  Step = c("All CONUS sources",
+           "Removed: inactive or temporarily inactive in the WSD",
+           "Removed: PWS not active in SDWA",
+           "Kept: active sources"),
+  Sources = c(nrow(all_conus_sources), nrow(wsd_inactive), nrow(sdwa_inactive), nrow(results_all)),
+  Parks = c(n_distinct(all_conus_sources$park_unit), n_distinct(wsd_inactive$park_unit),
+            n_distinct(sdwa_inactive$park_unit), n_distinct(results_all$park_unit)),
+  `On rapid list` = c(sum(all_conus_sources$wsd_source_id %in% rapid_source_ids),
+                      sum(wsd_inactive$wsd_source_id %in% rapid_source_ids),
+                      sum(sdwa_inactive$wsd_source_id %in% rapid_source_ids),
+                      sum(results_all$wsd_source_id %in% rapid_source_ids))
+) |>
+  show_table()
+```
+
+## Step 2: Rate scale from population served
+
+Population served is `POPULATION_SERVED_COUNT` from the SDWA public water system table,
+matched on PWS number. Sources with two PWS numbers use the active record, then the
+larger population. The first matching row sets each source's category:
+
+```{r step2-rules}
+tribble(
+  ~Order, ~Category, ~Rule, ~`Population used`,
+  1, "Proposed", "Classification is Proposed System", "None",
+  2, "Non-potable", "Classification is Non-Potable (NonPOT)", "None",
+  3, "Municipal/purchased", "Municipal, purchased, hauled, or tribal source that isn't federally owned", "None",
+  4, "Non-PWS", "Classification is Non-Public Water System, with no SDWA population", paste0(assumed_pop_non_pws, " (assumed)"),
+  5, "Low", paste0("Population served of ", tier_low_max, " or less"), paste0("SDWA, or ", assumed_pop_pws, " (assumed) if the PWS number has no usable match"),
+  6, "Moderate", paste0("Population served of ", tier_low_max + 1, " to ", fmt(tier_moderate_max)), "SDWA",
+  7, "High", paste0("Population served above ", fmt(tier_moderate_max)), "SDWA"
+) |>
+  show_table()
+```
+
+The `r tier_low_max` and `r fmt(tier_moderate_max)` breaks follow EPA's "very small" and
+"small" system size classes. Municipal supplies get no population because SDWA reports
+the whole utility, as these examples show:
+
+```{r step2-municipal}
+results_all |>
+  filter(system_category == "Municipal/purchased", !is.na(population_served)) |>
+  distinct(pws_name, population_served, park_unit) |>
+  group_by(`SDWA system` = pws_name, `SDWA population` = population_served) |>
+  summarize(Parks = paste(sort(unique(park_unit)), collapse = ", "), .groups = "drop") |>
+  arrange(desc(`SDWA population`)) |>
+  head(5) |>
+  show_table(caption = "Largest populations among municipal supplies")
+```
+
+```{r step2-counts}
+results |>
+  group_by(Category = system_category) |>
+  summarize(Sources = n(), Parks = n_distinct(park_unit)) |>
+  show_table(caption = "Rapid sources by category")
+```
+
+```{r step2-map}
+factor_map(system_importance, "system_category", category_colors, "Scale category")
+```
+
+## Step 3: Separate staff-only systems
+
+`point_of_use` is free text, so it's grouped by keyword. The first matching group wins,
+so a system serving a visitor center and staff housing counts as visitor-facing. Only the
+Staff/admin group changes the result: those systems are left out of the park role
+comparison in Step 4. "Other" and "Missing" count as visitor-facing.
+
+```{r step3-patterns}
+tibble(Group = names(pou_patterns),
+       Keywords = pou_patterns |> str_remove_all(fixed("\\b")) |> str_replace_all(fixed("|"), ", ")) |>
+  show_table()
+```
+
+```{r step3-counts}
+results |>
+  filter(system_category %in% park_run_categories) |>
+  count(Group = pou_type, Category = system_category) |>
+  pivot_wider(names_from = Category, values_from = n, values_fill = 0) |>
+  show_table(caption = "Park-run rapid sources by point-of-use group and category")
+```
+
+## Step 4: Assign a park role
+
+Each park's own potable systems (Non-PWS, Low, Moderate, High) are compared with each
+other. Each PWS counts once, however many sources it has. Roles use all active sources,
+not only those on the rapid list.
+
+- **Primary:** the park's largest visitor-facing system. Systems with the same
+  population are all primary.
+- **Secondary:** any other visitor-facing system serving at least
+  `r 100 * secondary_share_min`% of the park's visitor-facing population.
+- **Minor:** any other visitor-facing system.
+- **Staff only:** every source of the system is in the Staff/admin group.
+- **Not park-run:** municipal, non-potable, and proposed sources.
+
+```{r step4-counts}
+results |>
+  count(Role = park_role, Scale = system_category) |>
+  pivot_wider(names_from = Scale, values_from = n, values_fill = 0) |>
+  show_table(caption = "Rapid sources by park role and scale")
+```
+
+```{r step4-map}
+factor_map(system_importance, "park_role", role_colors, "Park role")
+```
+
+## Step 5: Add park context
+
+- **Busy park:** mean annual recreation visits (`TRV`), 2020--2024, of at least
+  `r fmt(park_vis_high)`. Total visits (`TV`) aren't used because they include
+  non-recreation traffic such as commuters.
+- **Municipal check:** the park has fewer municipal connections than park-run systems.
+  Parks that fail may get most of their water from a utility, so their own largest system
+  isn't treated as their main supply. The connection count doesn't reflect how much water
+  each one supplies.
+
+```{r step5-counts}
+results |>
+  group_by(park_unit) |>
+  summarize(class = first(park_visitation_class),
+            passes = first(n_municipal) < first(n_park_run)) |>
+  group_by(`Visitation class` = factor(class, levels = c("High", "Moderate", "Low", "No data"))) |>
+  summarize(Parks = n(), `Pass municipal check` = sum(passes), `Fail municipal check` = sum(!passes)) |>
+  show_table(caption = "Rapid parks by visitation class and municipal check")
+```
+
+## Step 6: Assign the importance category
+
+The first matching row sets each source's category. Every row that uses the park role
+only applies to a PWS (Low, Moderate, or High scale) at a park that passes the municipal
+check. Non-PWS systems can't qualify through the park role, because they serve fewer than
+25 people per day by definition.
+
+```{r step6-rules}
+tribble(
+  ~Order, ~Category, ~Reason, ~Rule,
+  1, "Not rated", "Non-potable, Municipal or purchased, or Proposed", "Scale category is one of these",
+  2, "High", "High scale", paste0("Serves more than ", fmt(tier_moderate_max), " people"),
+  3, "High", "Primary system at a busy park", paste0("Primary role at a park with ", fmt(park_vis_high), "+ recreation visits"),
+  4, "Moderate", "Moderate scale", paste0("Serves ", tier_low_max + 1, " to ", fmt(tier_moderate_max), " people"),
+  5, "Moderate", "Primary system at a moderately busy park", paste0("Primary role at a park with ", fmt(park_vis_moderate), " to ", fmt(park_vis_high), " recreation visits"),
+  6, "Moderate", "Secondary system at a busy park", paste0("Secondary role at a park with ", fmt(park_vis_high), "+ recreation visits"),
+  7, "Low", "Staff-only system", "Park role is Staff only",
+  8, "Low", "Non-public system", "Scale is Non-PWS",
+  9, "Low", "Small system", "Everything else: a Low-scale PWS without a qualifying role"
+) |>
+  show_table()
+```
+
+```{r step6-counts}
+results |>
+  count(`Importance category` = importance_category, Reason = importance_reason, name = "Sources") |>
+  left_join(results |>
+              group_by(Reason = importance_reason) |>
+              summarize(Parks = n_distinct(park_unit)),
+            by = "Reason") |>
+  show_table(caption = "Rapid sources by importance category and reason")
+```
+
+## Step 7: Filter to the rapid list
+
+The table is limited to sources returned by `get_wsd(rapid = TRUE)`. Roles and municipal
+counts were calculated before this filter, so they still reflect each park's full set of
+systems.
+
+```{r step7-counts}
+tibble(
+  Step = c("Active sources", "Active sources on the rapid list"),
+  Sources = c(nrow(results_all), nrow(results)),
+  Parks = c(n_distinct(results_all$park_unit), n_distinct(results$park_unit)),
+  High = c(sum(results_all$importance_category == "High"), sum(results$importance_category == "High")),
+  Moderate = c(sum(results_all$importance_category == "Moderate"), sum(results$importance_category == "Moderate"))
+) |>
+  show_table()
+```
+
+## Parks with no High system
+
+Most parks have no High system. That's expected: outside busy parks, a system needs a
+High scale to qualify.
+
+```{r not-captured-overview}
+results |>
+  group_by(park_unit) |>
+  summarize(class = first(park_visitation_class), any_high = any(high_importance)) |>
+  group_by(`Visitation class` = factor(class, levels = c("High", "Moderate", "Low", "No data"))) |>
+  summarize(Parks = n(), `With a High source` = sum(any_high),
+            Without = sum(!any_high)) |>
+  show_table()
+```
+
+### Busy parks with no High system
+
+```{r busy-missed}
+# Judged on all active sources, because a park's primary system may not be on the rapid list
+busy_missed <- results_all |>
+  filter(park_unit %in% busy_parks,
+         !park_unit %in% results$park_unit[results$high_importance]) |>
+  group_by(park_unit) |>
+  summarize(
+    `Recreation visits` = round(first(park_rec_visits)),
+    `Park-run systems` = first(n_park_run),
+    `Municipal connections` = first(n_municipal),
+    `Primary system` = paste(unique(water_system_name[park_role == "Primary"]), collapse = "; "),
+    `Primary population` = if (any(park_role == "Primary")) max(population_estimate[park_role == "Primary"]) else NA_real_,
+    primary_is_pws = any(park_role == "Primary" & system_category %in% pws_categories),
+    primary_on_rapid = any(park_role == "Primary" & wsd_source_id %in% rapid_source_ids),
+    passes_municipal = first(n_municipal) < first(n_park_run)
+  ) |>
+  mutate(Reason = case_when(
+    `Park-run systems` == 0 ~ "No park-run systems: all water is municipal, purchased, or hauled",
+    !primary_is_pws ~ "Primary system isn't a PWS",
+    !passes_municipal ~ "Fails the municipal check",
+    !primary_on_rapid ~ "Primary system isn't on the rapid list",
+    TRUE ~ "Other"
+  ),
+  `Passes municipal check` = passes_municipal) |>
+  select(-primary_is_pws, -primary_on_rapid, -passes_municipal) |>
+  rename(Park = park_unit) |>
+  arrange(Reason, desc(`Recreation visits`))
+
+show_table(busy_missed)
+```
+
+```{r busy-missed-map}
+factor_map(filter(system_importance, park_unit %in% busy_missed$Park), "system_category",
+           category_colors, "Busy parks with no High system")
+```
+
+## Data clarification needed
+
+Each item below is a place where the databases may be wrong or incomplete, with a
+suggested way to confirm it. Within each table, sources that are currently High come
+first, because a correction there is most likely to change a result.
+
+```{r clarification-summary}
+busy_municipal_fail <- busy_missed |>
+  filter(Reason == "Fails the municipal check") |>
+  pull(Park)
+
+tribble(
+  ~`#`, ~Item, ~Sources, ~`Currently High`, ~`How to confirm`,
+  1, "Population far above visits",
+  sum(results$review_population_vs_visits), sum(results$high_importance & results$review_population_vs_visits),
+  "Check the PWS in the state drinking water viewer or SDWIS, and the latest OPH sanitary survey",
+  2, "SDWA population may not describe the park",
+  sum(results$review_population), sum(results$high_importance & results$review_population),
+  "Confirm who owns and uses the PWS; reclassify as municipal in the WSD if it's a utility",
+  3, "PWS with an assumed population",
+  sum(results$review_assumed_pws), sum(results$high_importance & results$review_assumed_pws),
+  "Fix the PWS number in the WSD, or look it up in SDWA by system name",
+  4, "Tied primary systems",
+  sum(results$review_tied_primary), sum(results$high_importance & results$review_tied_primary),
+  "Break the tie with OPH survey populations or water use records",
+  5, "PWS sorted as staff only",
+  sum(results$review_staff_only_pws), sum(results$high_importance & results$review_staff_only_pws),
+  "Read the WSD description; add a keyword or a manual correction",
+  6, "Busy parks failing the municipal check",
+  sum(results$park_unit %in% busy_municipal_fail & results$system_category %in% pws_categories), 0L,
+  "Compare purchased and produced water volumes in park water use records",
+  7, "Classification and use category disagree",
+  sum(results$review_potable_conflict), sum(results$high_importance & results$review_potable_conflict),
+  "Check the OPH survey or ask the park; correct one field in the WSD",
+  8, "Active in the WSD but not in SDWA",
+  nrow(sdwa_inactive), 0L,
+  "Check SDWA for a deactivation date or a replacement PWS number"
+) |>
+  show_table()
+```
+
+### 1. Population far above recreation visits
+
+SDWA population is at or above average recreation visits per day. Busy seasons, staff,
+and residents can explain some of these, but others may be errors, such as Martin Van
+Buren's 10,000.
+
+**How to confirm:**
+
+- Check that the PWS number matches the system: compare `SDWA system` with `System`.
+- Look up the PWS in the state drinking water viewer or SDWIS. Check the population type
+  (residential, transient, non-transient) and whether the count has changed over time.
+- Compare with the population in the park's latest OPH sanitary survey.
+- If SDWA is wrong, record the corrected population so it can override SDWA.
+
+```{r clarify-population-visits}
+results |>
+  filter(review_population_vs_visits) |>
+  distinct(park_unit, unit_id, .keep_all = TRUE) |>
+  mutate(ratio = population_estimate / (park_rec_visits / 365)) |>
+  arrange(desc(high_importance), desc(ratio)) |>
+  transmute(Park = park_unit,
+            System = water_system_name,
+            `SDWA system` = pws_name,
+            `PWS number` = pws_number_clean,
+            `SDWA type` = pws_type_desc,
+            Population = population_estimate,
+            `Recreation visits` = round(park_rec_visits),
+            `Times visits per day` = ratio,
+            `Importance category` = importance_category) |>
+  show_table(height = "400px")
+```
+
+### 2. SDWA population may not describe the park
+
+These are federally owned systems with a municipal, purchased, hauled, or tribal source,
+and non-federal community water systems listed as park-run. Their SDWA population may
+include people outside the park, such as a military base or a town.
+
+**How to confirm:**
+
+- Check the PWS owner and service area in SDWA or the state viewer.
+- Ask the park whether the system also serves non-NPS users.
+- If it's a utility the park buys from, change `source_type` in the WSD to municipal or
+  purchased. It then moves to the Municipal/purchased category.
+
+```{r clarify-population-park}
+results |>
+  filter(review_population) |>
+  arrange(desc(high_importance), desc(population_estimate)) |>
+  transmute(Park = park_unit,
+            System = water_system_name,
+            `SDWA system` = pws_name,
+            Owner = owner_type_desc,
+            `SDWA type` = pws_type_desc,
+            `Source type` = source_type,
+            Population = population_estimate,
+            `Importance category` = importance_category) |>
+  show_table(height = "350px")
+```
+
+### 3. PWS with an assumed population
+
+These sources are classified as public water systems, but their PWS number didn't match
+an SDWA record with a population, so they're given `r assumed_pop_pws` people. The real
+population could move them into a different scale or change which system is primary.
+
+**How to confirm:**
+
+- Check the PWS number format in the WSD, such as a missing state prefix or extra
+  characters.
+- Search SDWA by system name and state to find the right PWS number.
+- Update `pws_number` in the WSD.
+
+```{r clarify-assumed}
+results |>
+  filter(review_assumed_pws) |>
+  arrange(desc(high_importance), desc(park_rec_visits)) |>
+  transmute(Park = park_unit,
+            System = water_system_name,
+            Classification = classification,
+            `PWS number in WSD` = pws_number_clean,
+            Role = park_role,
+            `Recreation visits` = round(park_rec_visits),
+            `Importance category` = importance_category) |>
+  show_table(height = "350px")
+```
+
+### 4. Tied primary systems
+
+When several systems at a park have the same population, they're all primary. Ties
+usually mean the populations are defaults or rough estimates, so the real main system
+can't be told apart.
+
+**How to confirm:**
+
+- Compare populations in the park's OPH sanitary survey.
+- Compare annual water use for each system, for example in
+  `data/Water_Supply_Systems/Manual_Water_Use_from_IRMA.xlsx`.
+- If one system is clearly larger, correct its population.
+
+```{r clarify-ties}
+results |>
+  filter(review_tied_primary) |>
+  distinct(park_unit, water_system_name, .keep_all = TRUE) |>
+  arrange(desc(high_importance), park_unit) |>
+  transmute(Park = park_unit,
+            System = water_system_name,
+            `Point of use` = point_of_use,
+            Population = population_estimate,
+            Source = population_source,
+            Scale = system_category,
+            `Tied systems` = n_tied_primary,
+            `Importance category` = importance_category) |>
+  show_table(height = "400px")
+```
+
+### 5. PWS sorted as staff only
+
+These public water systems were left out of the park role comparison because their
+`point_of_use` matched only staff keywords. If visitors use them, the park's primary
+system could change.
+
+**How to confirm:**
+
+- Read the `point_of_use` text below and the WSD `description` field.
+- If a system serves visitors, add the missing keyword to the Lodging, Campground, or
+  Visitor day use group, or record a manual correction for that system.
+
+```{r clarify-staff-only}
+results |>
+  filter(review_staff_only_pws) |>
+  distinct(park_unit, water_system_name, .keep_all = TRUE) |>
+  arrange(desc(park_rec_visits)) |>
+  transmute(Park = park_unit,
+            System = water_system_name,
+            `Point of use` = point_of_use,
+            Population = population_estimate,
+            Scale = system_category,
+            `Busy park` = park_visitation_class == "High") |>
+  show_table(height = "400px")
+```
+
+### 6. Busy parks failing the municipal check
+
+These busy parks have at least as many municipal connections as park-run systems, so
+their largest system isn't counted. The check counts connections, not volume, so a park
+may still get most of its water from its own system.
+
+**How to confirm:**
+
+- Compare the volume each park buys with the volume it produces, from park water use or
+  utility billing records (for example `Manual_Water_Use_from_IRMA.xlsx`).
+- Ask the park whether the municipal connections serve major visitor areas.
+- If the park's own system supplies most of the water, it should pass the check.
+
+```{r clarify-municipal}
+results_all |>
+  filter(park_unit %in% busy_municipal_fail,
+         system_category %in% c(pws_categories, "Municipal/purchased")) |>
+  distinct(park_unit, water_system_name, .keep_all = TRUE) |>
+  arrange(park_unit, system_category) |>
+  transmute(Park = park_unit,
+            System = water_system_name,
+            Category = system_category,
+            Role = park_role,
+            Population = population_estimate,
+            `Source type` = source_type,
+            `Point of use` = point_of_use) |>
+  show_table(height = "400px")
+```
+
+### 7. Classification and use category disagree
+
+Classification sets the Non-potable category. These sources have a `use_category` that
+suggests otherwise, so they may be in the wrong category.
+
+**How to confirm:**
+
+- Check the latest OPH sanitary survey or ask the park whether the source supplies
+  drinking water.
+- Correct `classification` or `use_category` in the WSD.
+
+```{r clarify-potable}
+results |>
+  filter(review_potable_conflict) |>
+  arrange(desc(high_importance), park_unit) |>
+  transmute(Park = park_unit,
+            System = water_system_name,
+            Classification = classification,
+            `Use category` = use_category,
+            Category = system_category,
+            `Importance category` = importance_category) |>
+  show_table(height = "350px")
+```
+
+### 8. Active in the WSD but not in SDWA
+
+These sources were removed in Step 1 because their PWS isn't active in SDWA, but the WSD
+lists them as active. Some may still be in use under a new PWS number.
+
+**How to confirm:**
+
+- Look up the PWS in SDWA or the state viewer for a deactivation date and reason.
+- Search SDWA for an active system with a similar name at the same park, which may be a
+  replacement PWS number.
+- Update the WSD: either mark the source inactive or correct its `pws_number`.
+
+```{r clarify-inactive}
+sdwa_inactive |>
+  arrange(desc(wsd_source_id %in% rapid_source_ids), park_unit) |>
+  transmute(Park = park_unit,
+            System = water_system_name,
+            `PWS number` = pws_number_clean,
+            `SDWA system` = pws_name,
+            `SDWA status` = pws_activity_status,
+            Population = population_served,
+            `On rapid list` = wsd_source_id %in% rapid_source_ids) |>
+  show_table(height = "350px")
+```
+
+## Appendix: alternatives considered
+
+Other rules tested before choosing the current one. "Busy parks covered" counts busy
+parks with at least one High source.
+
+```{r alternatives}
+# The earlier primary rule: at least 50% of the park's park-run population (all systems,
+# including staff-only), with the same municipal check
+old_share <- results_all |>
+  filter(system_category %in% park_run_categories) |>
+  distinct(park_unit, unit_id, population_estimate) |>
+  group_by(park_unit) |>
+  mutate(share_all = population_estimate / sum(population_estimate)) |>
+  ungroup() |>
+  select(park_unit, unit_id, share_all)
+
+alt <- results |>
+  left_join(old_share, by = c("park_unit", "unit_id")) |>
+  mutate(high_scale = system_category == "High",
+         busy = park_visitation_class == "High",
+         pws = system_category %in% pws_categories,
+         passes_municipal = n_municipal < n_park_run,
+         earlier_rule = high_scale | (pws & coalesce(share_all, 0) >= 0.5 & busy & passes_municipal))
+
+alternatives <- list(
+  "High scale only" = alt$high_scale,
+  "Earlier rule: 50%+ of park-run population at busy parks" = alt$earlier_rule,
+  "Earlier rule plus all Moderate at busy parks" = alt$earlier_rule | (alt$system_category == "Moderate" & alt$busy),
+  "Current rule (primary PWS at busy parks)" = alt$high_importance,
+  "Current rule without the municipal check" = alt$high_scale | (alt$park_role == "Primary" & alt$pws & alt$busy),
+  "Current rule plus secondary PWS" =
+    alt$high_importance | (alt$park_role == "Secondary" & alt$pws & alt$busy & alt$passes_municipal)
+)
+
+imap_dfr(alternatives, function(selected, name) {
+  selected <- coalesce(selected, FALSE)
+  parks <- unique(alt$park_unit[selected])
+  tibble(Rule = name,
+         Sources = sum(selected),
+         Parks = length(parks),
+         `Busy parks covered` = paste0(sum(busy_parks %in% parks), " of ", length(busy_parks)))
+}) |>
+  show_table()
+```
