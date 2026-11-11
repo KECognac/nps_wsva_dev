@@ -430,6 +430,20 @@ temp_sen <- calc_temp_sensitivity(water_supplies,
                                   verbose = TRUE)
 ```
 
+
+### Treatment Capacity
+
+Scores treatment capacity from the WSD `treatment_system_type` (0 = untreated or unknown, 5 = full treatment train for the source type; coastal sources need reverse osmosis for 4-5). Higher raw = less sensitive, so norm_/rank_ are inverted. Inactive, non-potable, and proposed sources are NA. See `Explore/explore_treatment_capacity_sensitivity.Rmd`.
+
+```{r}
+treatment_sen <- calc_treatment_capacity_sensitivity(water_supplies = water_supplies,
+                                                     coast_geometry = here("data", "rapid", "inputs", "coast_comp", "coastal_site_geometry.csv"),
+                                                     save = TRUE,
+                                                     output_dir = "data/rapid/outputs/",
+                                                     verbose = TRUE)
+```
+
+
 ### Consecutive Dry and Wet Periods
 
 Historical CDD and CWD sensitivity uses Sen's slope for each historical LOCA2
