@@ -15,7 +15,11 @@ knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
 ```{r load, include=FALSE}
 source("setup.R")
 
-water_supplies <- get_wsd(rapid = TRUE)
+# TEMPORARY: get_wsd(rapid = TRUE) doesn't drop the new "consecutive" source type yet
+# (park-run systems that buy piped water). Remove this filter once npswavacore's
+# get_wsd() excludes it along with municipal, hauled, tribal, and purchased.
+water_supplies <- get_wsd(rapid = TRUE) |>
+  dplyr::filter(coalesce(source_type, "") != "consecutive")
 
 treatment <- calc_treatment_capacity_sensitivity(water_supplies)
 
@@ -49,9 +53,8 @@ score_colors <- c("0" = "#8C2B0E", "1" = "#CB7223", "2" = "#DFCB34",
 
 score_map <- function(data, label) {
   data <- mutate(data, score = droplevels(score))
-  mapview(data, zcol = "score", layer.name = label, map.types = NULL,
-          col.regions = unname(score_colors[levels(data$score)])) |>
-    add_nps_basemaps()
+  mapview(data, zcol = "score", layer.name = label, map.types = "Esri.WorldTopoMap",
+          col.regions = unname(score_colors[levels(data$score)]))
 }
 ```
 
@@ -69,9 +72,10 @@ The method comes from Lynette Schwanger's exploration
 water supply list and conventions. With the same coastal flag, the function reproduces
 her scores for every source it scores. The changes from her version are:
 
-- It uses `get_wsd(rapid = TRUE)`, so municipal, purchased, hauled, and tribal sources
-  aren't included.
-- Inactive, non-potable, and proposed sources aren't scored.
+- It uses `get_wsd(rapid = TRUE)`, so municipal, purchased, hauled, tribal, and
+  consecutive sources aren't included.
+- Inactive, non-potable, and proposed sources aren't scored. Temporarily inactive
+  sources are scored, since they're recent or possibly temporary closures.
 - Coastal sources are identified with the rapid `coast_dist_m` (source within 50 km of
   the NOAA CUSP shoreline), instead of park centroids within 50 km of the TIGER coastline.
 - Unknown treatment scores 0, as before, but is flagged in `treatment_unknown`.
@@ -190,8 +194,7 @@ treatment |>
 ```{r step4-map}
 mapview(filter(treatment_sf, is.na(score_note), coastal),
         zcol = "has_reverse_osmosis", layer.name = "Coastal sources: reverse osmosis",
-        map.types = NULL, col.regions = c("#8C2B0E", "#1F5F8B")) |>
-  add_nps_basemaps()
+        map.types = "Esri.WorldTopoMap", col.regions = c("#8C2B0E", "#1F5F8B"))
 ```
 
 ## Results
