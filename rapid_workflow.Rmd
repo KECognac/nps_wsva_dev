@@ -20,7 +20,11 @@ parks <- get_park_system()
 Read in water supply database for filtered parks
 
 ```{r}
-water_supplies <- get_wsd(rapid = TRUE) 
+# TEMPORARY: get_wsd(rapid = TRUE) doesn't drop the new "consecutive" source type yet
+# (park-run systems that buy piped water). Remove this filter once npswavacore's
+# get_wsd() excludes it along with municipal, hauled, tribal, and purchased.
+water_supplies <- get_wsd(rapid = TRUE) |>
+  dplyr::filter(coalesce(source_type, "") != "consecutive")
 ```
 
 Save water supplies to app data
