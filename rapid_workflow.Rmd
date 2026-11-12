@@ -565,14 +565,14 @@ storm_surge_sen <- calc_storm_surge_sensitivity(water_supplies = water_supplies,
 ```
 
 
-# System Importance
+# Service Reach
 
-Not a scored indicator: assigns each water supply an importance category (High, Moderate, Low, Not rated) used to filter or add context to the results. Uses the point `water_supplies`, not the buffer. See `Explore/explore_system_importance.Rmd` for the logic.
+Not a scored indicator: describes each water supply's service reach (Wide, Moderate, Focused, Not assessed) from the people it serves and its role at the park, used to filter or add context to the results. Uses the point `water_supplies`, not the buffer, and downloads park visitation, so it needs internet. See `Explore/explore_service_reach.Rmd` for the logic.
 
 ```{r}
-system_importance <- calc_system_importance(water_supplies = water_supplies,
-                                            save = TRUE,
-                                            output_dir = "data/rapid/outputs/")
+service_reach <- calc_service_reach(water_supplies = water_supplies,
+                                    save = TRUE,
+                                    output_dir = "data/rapid/outputs/")
 ```
 
 
