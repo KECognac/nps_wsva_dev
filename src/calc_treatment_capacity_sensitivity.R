@@ -30,6 +30,8 @@
 #'
 #' Sources get an NA score, with the reason in `score_note`, when they are
 #' inactive, non-potable, proposed, reclaimed, or treated by a municipal provider.
+#' Only `active == "inactive"` (out of use for roughly 5-10+ years) counts as
+#' inactive; "temporarily inactive" sources are scored like active ones.
 #'
 #' A higher raw score means more treatment capacity and lower sensitivity, so
 #' norm_ and rank_ columns are inverted (higher = more sensitive).
@@ -159,7 +161,8 @@ calc_treatment_capacity_sensitivity <- function(water_supplies,
 
       # Reason a source isn't scored. The first matching condition wins.
       score_note = case_when(
-        coalesce(active, "active") != "active" ~ "Inactive",
+        # Only long-term closures; "temporarily inactive" sources are scored
+        coalesce(active, "active") == "inactive" ~ "Inactive",
         classification == "Proposed System" ~ "Proposed",
         classification == "Non-Potable (NonPOT)" ~ "Non-potable",
         source_type == "reclaimed" ~ "Reclaimed",
