@@ -1,22 +1,41 @@
-#' Calculate Water System Importance
+#' Calculate Water System Service Reach
 #'
-#' Assigns each water supply an importance category (High, Moderate, Low, or
-#' Not rated) with a reason. This isn't a scored indicator, so it isn't
+#' Assigns each water supply a service reach category (Wide, Moderate, Focused,
+#' or Not assessed) with a reason. Reach describes how many people a system
+#' serves and its role at the park; it doesn't rank systems as more or less
+#' important. This isn't a scored indicator, so it isn't
 #' normalized; it's used to filter or add context to the rapid results.
 #'
 #' Each system is rated on two things, then combined with park visitation:
 #' - Scale: population served from EPA SDWA (EPA size breaks at 500 and 3,300).
 #'   Municipal supplies get no population, because SDWA reports the whole utility.
+#'   In the WSD, a municipal, purchased, hauled, or tribal `source_type` means the
+#'   water comes from outside the park; the linked PWS shows who runs the pipes:
+#'   - If the PWS is an NPS system (federally owned and not another agency such as
+#'     the Navy or Air Force), the park buys water and distributes it itself. Its
+#'     SDWA population is the park's, so it's assessed like any park-run system.
+#'   - Otherwise the PWS is the utility's own system (a town, district, private
+#'     utility, or another agency) and the park is one customer. It's "Municipal/
+#'     purchased" and gets no population.
+#'   - Water hauled from another of the park's own systems (`supplied_from` gives a
+#'     WSD system ID) is park water, not municipal.
 #' - Park role: how the system compares with the park's other visitor-facing,
 #'   park-run systems (Primary = largest, Secondary = 30%+ share, Minor, Staff only).
 #'
 #' Park roles and municipal counts need every active source at the park, including
 #' municipal supplies that aren't on the rapid list, so they're calculated from
 #' `all_water_supplies` before the output is limited to `water_supplies`.
-#' Sources that are inactive in the WSD or SDWA are removed before anything is
-#' calculated.
 #'
-#' See Explore/explore_system_importance.Rmd for the logic, results, and the
+#' Activity status comes from the WSD only:
+#' - Sources that are inactive or temporarily inactive in the WSD are left out of
+#'   every calculation. They're still returned, as "Not assessed" with the reason
+#'   "Inactive in WSD", so every source in `water_supplies` has a row.
+#' - Sources that are active in the WSD but whose PWS isn't active in SDWA are
+#'   kept and assessed like any other active source, using SDWA's last reported
+#'   population. They're flagged in `review_sdwa_inactive` so the WSD and SDWA
+#'   records can be reconciled.
+#'
+#' See Explore/explore_service_reach.Rmd for the logic, results, and the
 #' items that need data clarification.
 #'
 #' @param water_supplies sf or data frame of the sources to return, usually
@@ -25,9 +44,12 @@
 #'   and hauled. Defaults to `get_wsd(conus = TRUE, fill_empty_coords = TRUE)`.
 #' @param sdwa data frame of `SDWA_PUB_WATER_SYSTEMS.csv`. Defaults to
 #'   `get_sdwa(file = "SDWA_PUB_WATER_SYSTEMS.csv")`.
-#' @param visitation_file path to the NPS visitor use statistics CSV
-#'   (`Main_Data.csv`), with columns UnitCode, Year, Statistic, and Value.
-#' @param visitation_years years averaged for recreation visits (`TRV`).
+#' @param visitation data frame of monthly visitation with UnitCode, Year, and
+#'   RecreationVisitors, as returned by [npswavacore::get_unit_visitation()].
+#'   Defaults to downloading `visitation_years` for every park with an active
+#'   source, so it needs internet.
+#' @param visitation_years years averaged for recreation visits. The default,
+#'   2021-2025, leaves out 2020, when COVID closures lowered visitation.
 #' @param tier_low_max,tier_moderate_max population breaks between Low, Moderate,
 #'   and High scale.
 #' @param assumed_pop_non_pws population given to non-public systems with no SDWA match.
@@ -37,37 +59,36 @@
 #' @param park_vis_high,park_vis_moderate annual recreation visits for a busy and a
 #'   moderately busy park.
 #' @param return_details logical. If TRUE, returns a list with the results, all
-#'   active sources, sources removed as inactive in SDWA, and the settings used.
+#'   CONUS sources (active and inactive), and the settings used.
 #' @param save logical, whether to save output
 #' @param output_dir character, directory path for saving files
 #' @param verbose logical, whether to show progress messages
 #'
-#' @return tibble with one row per source in `water_supplies` that is active,
-#'   with `importance_category`, `importance_reason`, `high_importance`, the
+#' @return tibble with one row per source in `water_supplies`,
+#'   with `service_reach`, `service_reach_reason`, `wide_reach`, the
 #'   supporting scale, role, and visitation columns, and `review_*` flags.
 #'   A list if `return_details = TRUE`.
 #'
-calc_system_importance <- function(water_supplies,
-                                   all_water_supplies = NULL,
-                                   sdwa = NULL,
-                                   visitation_file = "data/all/2024_Visitor_Use_Statistics/Main_Data.csv",
-                                   visitation_years = 2020:2024,
-                                   tier_low_max = 500,
-                                   tier_moderate_max = 3300,
-                                   assumed_pop_non_pws = 24,
-                                   assumed_pop_pws = 25,
-                                   secondary_share_min = 0.3,
-                                   park_vis_high = 1000000,
-                                   park_vis_moderate = 100000,
-                                   return_details = FALSE,
-                                   save = FALSE,
-                                   output_dir = NULL,
-                                   verbose = TRUE) {
+calc_service_reach <- function(water_supplies,
+                               all_water_supplies = NULL,
+                               sdwa = NULL,
+                               visitation = NULL,
+                               visitation_years = 2021:2025,
+                               tier_low_max = 500,
+                               tier_moderate_max = 3300,
+                               assumed_pop_non_pws = 24,
+                               assumed_pop_pws = 25,
+                               secondary_share_min = 0.3,
+                               park_vis_high = 1000000,
+                               park_vis_moderate = 100000,
+                               return_details = FALSE,
+                               save = FALSE,
+                               output_dir = NULL,
+                               verbose = TRUE) {
 
   # Input validation
   stopifnot(
     "water_supplies must contain wsd_source_id" = "wsd_source_id" %in% names(water_supplies),
-    "visitation_file not found" = file.exists(visitation_file),
     "save is TRUE but output_dir not provided" = !save || !is.null(output_dir)
   )
 
@@ -76,6 +97,14 @@ calc_system_importance <- function(water_supplies,
   pws_categories <- c("Low", "Moderate", "High")
   park_run_categories <- c("Non-PWS", pws_categories)
   municipal_pattern <- regex("municipal|hauled|tribal|purchased", ignore_case = TRUE)
+  # Federally owned PWS run by agencies other than NPS. A park buying water through
+  # one of these is a customer of that agency's system, like a town utility.
+  non_nps_federal_pattern <- regex(
+    "\\bNAS\\b|NAVAL|NAVY|AIR FORCE|\\bAFB\\b|ARMY|COAST GUARD|MARINE CORPS|CORPS OF ENG|FOREST SERVICE|\\bBLM\\b|VETERANS",
+    ignore_case = TRUE
+  )
+  # supplied_from values that point to another WSD system (e.g. "HALE_WS_001")
+  wsd_system_pattern <- regex("\\b[A-Z]{4}_WS_\\d{3}\\b")
 
   # Keyword groups for the free-text point_of_use field. The first match wins, so a
   # source serving both visitors and staff counts as visitor-facing. Only
@@ -102,7 +131,7 @@ calc_system_importance <- function(water_supplies,
   # WSD codes that differ from the visitation codes (same as calc_visitation_sensitivity)
   visitation_code_crosswalk <- c("ANAC" = "NCPE", "NACE" = "NCPE", "NAMA" = "NCPC", "VALR" = "PERL")
 
-  # 1. Import all sources and remove inactive ones -----------------------------
+  # 1. Import all sources and set aside those inactive in the WSD ---------------
   if (verbose) message("Reading water supplies and SDWA data...")
 
   if (is.null(all_water_supplies)) {
@@ -112,13 +141,20 @@ calc_system_importance <- function(water_supplies,
     sdwa <- get_sdwa(file = "SDWA_PUB_WATER_SYSTEMS.csv")
   }
 
-  sources <- all_water_supplies |>
+  all_sources <- all_water_supplies |>
     sf::st_drop_geometry() |>
     distinct(wsd_source_id, .keep_all = TRUE) |>
-    # Inactive and temporarily inactive sources are never considered. Missing counts as active.
-    dplyr::filter(coalesce(active, "active") == "active") |>
     select(park_unit, park_name, water_system_name, wsd_system_id, wsd_source_id, classification,
-           system_type, source_type, use_category, active, pws_number, point_of_use)
+           system_type, source_type, use_category, active, pws_number, supplied_from, point_of_use)
+
+  # Activity status comes from the WSD. Sources that are inactive or temporarily
+  # inactive in the WSD are left out of every calculation below and added back at
+  # the end as "Not assessed". A missing status counts as active.
+  wsd_inactive <- all_sources |>
+    dplyr::filter(coalesce(active, "active") != "active")
+
+  sources <- all_sources |>
+    dplyr::filter(coalesce(active, "active") == "active")
 
   sdwa_clean <- sdwa |>
     mutate(
@@ -146,8 +182,8 @@ calc_system_importance <- function(water_supplies,
            owner_type_desc,
            population_served   = POPULATION_SERVED_COUNT)
 
-  # One SDWA record per source. A few sources list two PWS numbers, so prefer an
-  # active record, then the largest population served.
+  # One SDWA record per source. A few sources list two PWS numbers, so prefer the
+  # record that's active in SDWA, then the largest population served.
   sdwa_by_source <- sources |>
     select(wsd_source_id, pws_number) |>
     separate_rows(pws_number, sep = ",\\s*") |>
@@ -157,21 +193,27 @@ calc_system_importance <- function(water_supplies,
     distinct(wsd_source_id, .keep_all = TRUE) |>
     select(-pws_number)
 
-  # Sources whose PWS isn't active in SDWA are also removed. They're active in the
-  # WSD, so they're kept for review.
-  sdwa_inactive <- sources |>
-    inner_join(sdwa_by_source, by = "wsd_source_id") |>
-    dplyr::filter(pws_activity_status != "A")
+  # SDWA activity status doesn't remove anything. A source that's active in the WSD
+  # stays in, even if its PWS is inactive in SDWA; it uses SDWA's last reported
+  # population and is flagged in review_sdwa_inactive (step 6).
 
-  sources <- sources |>
-    dplyr::filter(!wsd_source_id %in% sdwa_inactive$wsd_source_id)
+  # Mean annual recreation visits. Total visits also count non-recreation traffic
+  # such as commuters, which inflates parkways.
+  if (is.null(visitation)) {
+    visitation_codes <- unique(coalesce(visitation_code_crosswalk[sources$park_unit], sources$park_unit))
+    if (verbose) message("Downloading visitation for ", length(visitation_codes), " park units...")
+    # The API takes a comma-separated list of units, so request them in batches
+    visitation <- split(visitation_codes, ceiling(seq_along(visitation_codes) / 50)) |>
+      purrr::map(\(units) npswavacore::get_unit_visitation(units = units,
+                                                         startYear = min(visitation_years),
+                                                         endYear = max(visitation_years))) |>
+      purrr::list_rbind()
+  }
 
-  # Mean annual recreation visits. Total visits (TV) also count non-recreation
-  # traffic such as commuters, which inflates parkways.
-  park_visits <- readr::read_csv(visitation_file, show_col_types = FALSE) |>
-    dplyr::filter(Statistic == "TRV", Year %in% visitation_years) |>
+  park_visits <- visitation |>
+    dplyr::filter(Year %in% visitation_years) |>
     group_by(UnitCode, Year) |>
-    summarize(annual_visits = sum(Value, na.rm = TRUE), .groups = "drop") |>
+    summarize(annual_visits = sum(RecreationVisitors, na.rm = TRUE), .groups = "drop") |>
     group_by(UnitCode) |>
     summarize(park_rec_visits = mean(annual_visits))
 
@@ -183,10 +225,17 @@ calc_system_importance <- function(water_supplies,
     left_join(sdwa_by_source, by = "wsd_source_id") |>
     mutate(
       has_sdwa_pop = !is.na(population_served) & population_served > 0,
-      # Non-federal utilities report the population of their whole service area, not
-      # the park's portion. Federally owned systems buying water report their own.
-      is_municipal = str_detect(coalesce(source_type, ""), municipal_pattern) &
-        coalesce(owner_type_desc, "") != "Federal Government",
+      # Water from outside the park (municipal, purchased, hauled, or tribal source).
+      # Hauling from another of the park's own systems doesn't count.
+      outside_source = str_detect(coalesce(source_type, ""), municipal_pattern) &
+        !str_detect(coalesce(supplied_from, ""), wsd_system_pattern),
+      # An NPS-run PWS: federally owned and not another agency's system
+      nps_run_pws = coalesce(owner_type_desc, "") == "Federal Government" &
+        !str_detect(coalesce(pws_name, ""), non_nps_federal_pattern),
+      # Outside water through a utility's own system: SDWA reports the whole utility,
+      # not the park's portion. Outside water bought by an NPS-run PWS and
+      # distributed by the park is assessed with that PWS's population.
+      is_municipal = outside_source & !nps_run_pws,
       population_estimate = case_when(
         classification %in% c("Non-Potable (NonPOT)", "Proposed System") | is_municipal ~ NA_real_,
         has_sdwa_pop ~ population_served,
@@ -217,10 +266,13 @@ calc_system_importance <- function(water_supplies,
         (system_category == "Non-potable" & str_detect(use_category, "human-drinking")) |
           (system_category %in% park_run_categories & !str_detect(use_category, "human-drinking"))
       ),
-      # SDWA population may not describe the park: federal systems buying water can
+      # Active in the WSD, but the matched PWS isn't active in SDWA. Kept and assessed;
+      # flagged so the WSD and SDWA records can be reconciled.
+      review_sdwa_inactive = !is.na(pws_activity_status) & pws_activity_status != "A",
+      # SDWA population may not describe the park: NPS-run systems buying water can
       # serve others, and non-federal CWS listed as park-run may be utilities
       review_population = system_category %in% pws_categories & (
-        str_detect(coalesce(source_type, ""), municipal_pattern) |
+        outside_source |
           (coalesce(pws_type_desc, "") == "Community Water System" &
              coalesce(owner_type_desc, "") != "Federal Government")
       )
@@ -256,7 +308,7 @@ calc_system_importance <- function(water_supplies,
     distinct(park_unit, wsd_system_id) |>
     count(park_unit, name = "n_municipal")
 
-  # 5-6. Park context and importance category -----------------------------------
+  # 5-6. Park context and service reach ------------------------------------------
   all_results <- system_categories |>
     left_join(park_roles, by = c("park_unit", "unit_id")) |>
     left_join(park_municipal, by = "park_unit") |>
@@ -279,7 +331,7 @@ calc_system_importance <- function(water_supplies,
       # park-run systems are left out, because their own systems may not be their main supply.
       role_counts = system_category %in% pws_categories & n_municipal < n_park_run,
       # The first matching condition wins.
-      importance_reason = case_when(
+      service_reach_reason = case_when(
         system_category == "Non-potable" ~ "Non-potable",
         system_category == "Municipal/purchased" ~ "Municipal or purchased",
         system_category == "Proposed" ~ "Proposed",
@@ -292,15 +344,15 @@ calc_system_importance <- function(water_supplies,
         system_category == "Non-PWS" ~ "Non-public system",
         TRUE ~ "Small system"
       ),
-      importance_category = case_when(
-        importance_reason %in% c("Non-potable", "Municipal or purchased", "Proposed") ~ "Not rated",
-        importance_reason %in% c("High scale", "Primary system at a busy park") ~ "High",
-        importance_reason %in% c("Moderate scale", "Primary system at a moderately busy park",
+      service_reach = case_when(
+        service_reach_reason %in% c("Non-potable", "Municipal or purchased", "Proposed") ~ "Not assessed",
+        service_reach_reason %in% c("High scale", "Primary system at a busy park") ~ "Wide",
+        service_reach_reason %in% c("Moderate scale", "Primary system at a moderately busy park",
                                  "Secondary system at a busy park") ~ "Moderate",
-        TRUE ~ "Low"
+        TRUE ~ "Focused"
       ) |>
-        factor(levels = c("High", "Moderate", "Low", "Not rated")),
-      high_importance = importance_category == "High",
+        factor(levels = c("Wide", "Moderate", "Focused", "Not assessed")),
+      wide_reach = service_reach == "Wide",
       # Review flags
       review_staff_only_pws = park_role == "Staff only" & system_category %in% pws_categories,
       review_tied_primary = park_role == "Primary" & coalesce(n_tied_primary, 1L) > 1,
@@ -312,25 +364,48 @@ calc_system_importance <- function(water_supplies,
                                                            "Municipal/purchased", "Non-potable", "Proposed"))
     ) |>
     select(wsd_source_id, park_unit, park_name, water_system_name, wsd_system_id,
-           importance_category, importance_reason, high_importance,
+           service_reach, service_reach_reason, wide_reach,
            system_category, population_estimate, population_source, park_role,
            share_visitor_facing, n_tied_primary, n_park_run, n_municipal,
            park_rec_visits, park_visitation_class,
            classification, source_type, use_category, point_of_use, pou_type, unit_id,
+           outside_source, nps_run_pws, supplied_from,
            pws_number_clean, pws_name, pws_type_desc, owner_type_desc, pws_activity_status,
            population_served, starts_with("review_"))
 
-  # 7. Limit to the requested sources -------------------------------------------
+  # 7. Add back WSD-inactive sources and limit to the requested sources ----------
+  # Inactive sources weren't assessed, but they're returned so every source in
+  # water_supplies has a service reach.
+  all_results <- all_results |>
+    bind_rows(
+      wsd_inactive |>
+        transmute(wsd_source_id, park_unit, park_name, water_system_name, wsd_system_id,
+                  service_reach = factor("Not assessed", levels = levels(all_results$service_reach)),
+                  service_reach_reason = "Inactive in WSD",
+                  wide_reach = FALSE,
+                  classification, source_type, use_category, point_of_use)
+    ) |>
+    left_join(select(all_sources, wsd_source_id, active), by = "wsd_source_id") |>
+    relocate(active, .after = service_reach_reason) |>
+    mutate(across(starts_with("review_"), \(x) coalesce(x, FALSE)))
+
   # Roles and municipal counts above used all active sources, so they still
   # reflect each park's full set of systems.
+  requested_ids <- unique(water_supplies$wsd_source_id)
   final_results <- all_results |>
-    dplyr::filter(wsd_source_id %in% unique(water_supplies$wsd_source_id))
+    dplyr::filter(wsd_source_id %in% requested_ids)
+
+  missing_ids <- setdiff(requested_ids, final_results$wsd_source_id)
+  if (length(missing_ids) > 0) {
+    warning(length(missing_ids), " sources in water_supplies aren't in all_water_supplies ",
+            "and have no service reach: ", paste(head(missing_ids, 10), collapse = ", "))
+  }
 
   # Save results
   if (save) {
     if (!dir.exists(output_dir)) dir.create(output_dir, recursive = TRUE)
 
-    filename <- file.path(output_dir, paste0("system_importance_", Sys.Date(), ".csv"))
+    filename <- file.path(output_dir, paste0("service_reach_", Sys.Date(), ".csv"))
     write_csv(final_results, filename)
 
     if (verbose) {
@@ -340,12 +415,13 @@ calc_system_importance <- function(water_supplies,
 
   # Print timing
   if (verbose) {
-    n_removed <- dplyr::n_distinct(water_supplies$wsd_source_id) - nrow(final_results)
-    message(nrow(final_results), " sources returned (", n_removed, " removed as inactive); ",
-            sum(final_results$high_importance), " High")
+    message(nrow(final_results), " sources returned (",
+            sum(final_results$service_reach_reason == "Inactive in WSD"), " inactive in the WSD, ",
+            sum(final_results$review_sdwa_inactive), " active in the WSD but not in SDWA); ",
+            sum(final_results$wide_reach), " Wide")
     end_time <- Sys.time()
     total_time <- end_time - start_time
-    message("\nSystem importance processing completed in ",
+    message("\nService reach processing completed in ",
             round(total_time, 2), " ", attr(total_time, "units"))
   }
 
@@ -353,7 +429,6 @@ calc_system_importance <- function(water_supplies,
     return(list(
       results = final_results,
       all_sources = all_results,
-      sdwa_inactive = sdwa_inactive,
       settings = list(
         tier_low_max = tier_low_max, tier_moderate_max = tier_moderate_max,
         assumed_pop_non_pws = assumed_pop_non_pws, assumed_pop_pws = assumed_pop_pws,
