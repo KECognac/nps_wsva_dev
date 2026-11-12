@@ -7,7 +7,8 @@
 #'
 #' @param dest_dir Character. Path to the directory where the zip file and
 #'   unzipped contents will be saved. Created recursively if it does not exist.
-#'   Defaults to `"data/all/Water_Supply/"`.
+#'   Defaults to `all/Water_Supply/` in the shared data folder, see
+#'   [npswavacore::wava_data_path()].
 #' @param file Character. Name of the CSV file to read from the unzipped
 #'   directory. If the file does not exist, an error is thrown listing all
 #'   available CSVs. Defaults to `"SDWA_FACILITIES.csv"`. See Details for
@@ -49,7 +50,7 @@
 #' facilities <- get_sdwa(overwrite = TRUE)
 #'
 #' # Save to a custom directory
-#' facilities <- get_sdwa(dest_dir = "data/epa/sdwa/")
+#' facilities <- get_sdwa(dest_dir = npswavacore::wava_data_path("epa", "sdwa"))
 #' }
 #'
 #' @seealso \url{https://echo.epa.gov/tools/data-downloads/sdwa-download-summary}
@@ -60,7 +61,7 @@
 #'
 #' @export
 get_sdwa <- function(
-    dest_dir          = "data/all/Water_Supply/",
+    dest_dir          = npswavacore::wava_data_path("all", "Water_Supply"),
     file              = "SDWA_FACILITIES.csv",
     overwrite         = FALSE,
     skip_if_extracted = TRUE
