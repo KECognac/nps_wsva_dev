@@ -9,16 +9,16 @@
 #' Each system is rated on two things, then combined with park visitation:
 #' - Scale: population served from EPA SDWA (EPA size breaks at 500 and 3,300).
 #'   Municipal supplies get no population, because SDWA reports the whole utility.
-#'   In the WSD, a municipal, purchased, hauled, or tribal `source_type` means the
-#'   water comes from outside the park; the linked PWS shows who runs the pipes:
-#'   - If the PWS is an NPS system (federally owned and not another agency such as
-#'     the Navy or Air Force), the park buys water and distributes it itself. Its
-#'     SDWA population is the park's, so it's assessed like any park-run system.
-#'   - Otherwise the PWS is the utility's own system (a town, district, private
-#'     utility, or another agency) and the park is one customer. It's "Municipal/
-#'     purchased" and gets no population.
-#'   - Water hauled from another of the park's own systems (`supplied_from` gives a
-#'     WSD system ID) is park water, not municipal.
+#'   The WSD `source_type` decides whether the park runs the system:
+#'   - Physical sources (groundwater, spring, surface water, rainwater, ...): park-run.
+#'   - `consecutive`: the park buys piped water and runs its own storage and
+#'     distribution under its own PWS. Park-run, with that PWS's population.
+#'   - `hauled`: delivered into park storage, so park-run, unless `pws_number` is
+#'     the supplier's PWS (its PWSID appears in `supplied_from`, or SDWA lists a
+#'     local or state government owner). Water hauled from another park system
+#'     (`supplied_from` gives a WSD system ID) is always park water.
+#'   - `municipal`, `tribal`, `purchased/concessioner`: the park is a customer on
+#'     the supplier's system. "Municipal/purchased", with no population.
 #' - Park role: how the system compares with the park's other visitor-facing,
 #'   park-run systems (Primary = largest, Secondary = 30%+ share, Minor, Staff only).
 #'
@@ -27,9 +27,12 @@
 #' `all_water_supplies` before the output is limited to `water_supplies`.
 #'
 #' Activity status comes from the WSD only:
-#' - Sources that are inactive or temporarily inactive in the WSD are left out of
-#'   every calculation. They're still returned, as "Not assessed" with the reason
-#'   "Inactive in WSD", so every source in `water_supplies` has a row.
+#' - Sources that are inactive in the WSD (out of use for roughly 5-10 years or
+#'   more) are left out of every calculation. They're still returned, as "Not
+#'   assessed" with the reason "Inactive in WSD", so every source in
+#'   `water_supplies` has a row.
+#' - Sources that are temporarily inactive in the WSD (recently or possibly
+#'   temporarily closed) are kept and assessed like active sources.
 #' - Sources that are active in the WSD but whose PWS isn't active in SDWA are
 #'   kept and assessed like any other active source, using SDWA's last reported
 #'   population. They're flagged in `review_sdwa_inactive` so the WSD and SDWA
@@ -42,8 +45,11 @@
 #'   `get_wsd(rapid = TRUE)`. Only `wsd_source_id` is used.
 #' @param all_water_supplies all CONUS sources, including municipal, purchased,
 #'   and hauled. Defaults to `get_wsd(conus = TRUE, fill_empty_coords = TRUE)`.
-#' @param sdwa data frame of `SDWA_PUB_WATER_SYSTEMS.csv`. Defaults to
-#'   `get_sdwa(file = "SDWA_PUB_WATER_SYSTEMS.csv")`.
+#' @param sdwa_file path to `sdwa_public_water_systems.csv`, the EPA SDWA public
+#'   water system table saved by [process_sdwa_data()]. Defaults to
+#'   `rapid/inputs` in the shared data folder. Its SDWA release
+#'   (`SUBMISSIONYEARQUARTER`) and download date are added to the output as
+#'   `sdwa_release` and `sdwa_download_date`.
 #' @param visitation data frame of monthly visitation with UnitCode, Year, and
 #'   RecreationVisitors, as returned by [npswavacore::get_unit_visitation()].
 #'   Defaults to downloading `visitation_years` for every park with an active
@@ -71,7 +77,8 @@
 #'
 calc_service_reach <- function(water_supplies,
                                all_water_supplies = NULL,
-                               sdwa = NULL,
+                               sdwa_file = npswavacore::wava_data_path("rapid", "inputs",
+                                                                       "sdwa_public_water_systems.csv"),
                                visitation = NULL,
                                visitation_years = 2021:2025,
                                tier_low_max = 500,
@@ -96,13 +103,10 @@ calc_service_reach <- function(water_supplies,
 
   pws_categories <- c("Low", "Moderate", "High")
   park_run_categories <- c("Non-PWS", pws_categories)
-  municipal_pattern <- regex("municipal|hauled|tribal|purchased", ignore_case = TRUE)
-  # Federally owned PWS run by agencies other than NPS. A park buying water through
-  # one of these is a customer of that agency's system, like a town utility.
-  non_nps_federal_pattern <- regex(
-    "\\bNAS\\b|NAVAL|NAVY|AIR FORCE|\\bAFB\\b|ARMY|COAST GUARD|MARINE CORPS|CORPS OF ENG|FOREST SERVICE|\\bBLM\\b|VETERANS",
-    ignore_case = TRUE
-  )
+  # Source types where the park is a customer on the supplier's system
+  customer_pattern <- regex("municipal|tribal|purchased", ignore_case = TRUE)
+  # Source types where the water comes from outside the park
+  bought_pattern <- regex("municipal|tribal|purchased|consecutive|hauled", ignore_case = TRUE)
   # supplied_from values that point to another WSD system (e.g. "HALE_WS_001")
   wsd_system_pattern <- regex("\\b[A-Z]{4}_WS_\\d{3}\\b")
 
@@ -137,9 +141,17 @@ calc_service_reach <- function(water_supplies,
   if (is.null(all_water_supplies)) {
     all_water_supplies <- get_wsd(conus = TRUE, fill_empty_coords = TRUE)
   }
-  if (is.null(sdwa)) {
-    sdwa <- get_sdwa(file = "SDWA_PUB_WATER_SYSTEMS.csv")
+  if (!file.exists(sdwa_file)) {
+    stop("SDWA file not found: ", sdwa_file, "\nRun process_sdwa_data() first ",
+         "(see rapid_data_processing.Rmd).", call. = FALSE)
   }
+  sdwa <- readr::read_csv(sdwa_file,
+                          col_types = readr::cols(.default = readr::col_character(),
+                                                  POPULATION_SERVED_COUNT = readr::col_double()),
+                          show_col_types = FALSE)
+  # Which SDWA release the results use; EPA replaces its "latest" file each quarter
+  sdwa_release <- paste(sort(unique(sdwa$SUBMISSIONYEARQUARTER)), collapse = ", ")
+  sdwa_download_date <- paste(sort(unique(sdwa$download_date)), collapse = ", ")
 
   all_sources <- all_water_supplies |>
     sf::st_drop_geometry() |>
@@ -147,14 +159,15 @@ calc_service_reach <- function(water_supplies,
     select(park_unit, park_name, water_system_name, wsd_system_id, wsd_source_id, classification,
            system_type, source_type, use_category, active, pws_number, supplied_from, point_of_use)
 
-  # Activity status comes from the WSD. Sources that are inactive or temporarily
-  # inactive in the WSD are left out of every calculation below and added back at
-  # the end as "Not assessed". A missing status counts as active.
+  # Activity status comes from the WSD. Only sources marked "inactive" (out of use
+  # for roughly 5-10+ years) are left out of every calculation below and added back
+  # at the end as "Not assessed". "temporarily inactive" sources are recent or
+  # possibly temporary closures, so they stay in. A missing status counts as active.
   wsd_inactive <- all_sources |>
-    dplyr::filter(coalesce(active, "active") != "active")
+    dplyr::filter(coalesce(active, "active") == "inactive")
 
   sources <- all_sources |>
-    dplyr::filter(coalesce(active, "active") == "active")
+    dplyr::filter(coalesce(active, "active") != "inactive")
 
   sdwa_clean <- sdwa |>
     mutate(
@@ -225,17 +238,22 @@ calc_service_reach <- function(water_supplies,
     left_join(sdwa_by_source, by = "wsd_source_id") |>
     mutate(
       has_sdwa_pop = !is.na(population_served) & population_served > 0,
-      # Water from outside the park (municipal, purchased, hauled, or tribal source).
-      # Hauling from another of the park's own systems doesn't count.
-      outside_source = str_detect(coalesce(source_type, ""), municipal_pattern) &
-        !str_detect(coalesce(supplied_from, ""), wsd_system_pattern),
-      # An NPS-run PWS: federally owned and not another agency's system
-      nps_run_pws = coalesce(owner_type_desc, "") == "Federal Government" &
-        !str_detect(coalesce(pws_name, ""), non_nps_federal_pattern),
-      # Outside water through a utility's own system: SDWA reports the whole utility,
-      # not the park's portion. Outside water bought by an NPS-run PWS and
-      # distributed by the park is assessed with that PWS's population.
-      is_municipal = outside_source & !nps_run_pws,
+      # Water from another park system (supplied_from gives its WSD ID) is park water
+      in_park_transfer = str_detect(coalesce(supplied_from, ""), wsd_system_pattern),
+      # Water bought or hauled from outside the park (consecutive, hauled, municipal,
+      # tribal, or purchased source)
+      outside_source = str_detect(coalesce(source_type, ""), bought_pattern) & !in_park_transfer,
+      # Hauled water goes into park storage, but pws_number can be the supplier's PWS.
+      # It is when its PWSID appears in supplied_from or a town or state owns it.
+      hauled_supplier_pws = str_detect(coalesce(source_type, ""), regex("hauled", ignore_case = TRUE)) &
+        !in_park_transfer & !is.na(pws_number_clean) &
+        (str_detect(toupper(coalesce(supplied_from, "")), fixed(coalesce(pws_number_clean, "@"))) |
+           coalesce(owner_type_desc, "") %in% c("Local Government", "State Government")),
+      # The park is a customer on the supplier's system: SDWA reports the whole
+      # utility, not the park's portion, so these get no population. Consecutive
+      # systems are park-run and keep their own PWS's population.
+      is_municipal = (str_detect(coalesce(source_type, ""), customer_pattern) & !in_park_transfer) |
+        hauled_supplier_pws,
       population_estimate = case_when(
         classification %in% c("Non-Potable (NonPOT)", "Proposed System") | is_municipal ~ NA_real_,
         has_sdwa_pop ~ population_served,
@@ -269,8 +287,8 @@ calc_service_reach <- function(water_supplies,
       # Active in the WSD, but the matched PWS isn't active in SDWA. Kept and assessed;
       # flagged so the WSD and SDWA records can be reconciled.
       review_sdwa_inactive = !is.na(pws_activity_status) & pws_activity_status != "A",
-      # SDWA population may not describe the park: NPS-run systems buying water can
-      # serve others, and non-federal CWS listed as park-run may be utilities
+      # SDWA population may not describe the park: park-run systems buying or hauling
+      # water can serve others, and non-federal CWS listed as park-run may be utilities
       review_population = system_category %in% pws_categories & (
         outside_source |
           (coalesce(pws_type_desc, "") == "Community Water System" &
@@ -369,7 +387,7 @@ calc_service_reach <- function(water_supplies,
            share_visitor_facing, n_tied_primary, n_park_run, n_municipal,
            park_rec_visits, park_visitation_class,
            classification, source_type, use_category, point_of_use, pou_type, unit_id,
-           outside_source, nps_run_pws, supplied_from,
+           outside_source, in_park_transfer, supplied_from,
            pws_number_clean, pws_name, pws_type_desc, owner_type_desc, pws_activity_status,
            population_served, starts_with("review_"))
 
@@ -393,7 +411,8 @@ calc_service_reach <- function(water_supplies,
   # reflect each park's full set of systems.
   requested_ids <- unique(water_supplies$wsd_source_id)
   final_results <- all_results |>
-    dplyr::filter(wsd_source_id %in% requested_ids)
+    dplyr::filter(wsd_source_id %in% requested_ids) |>
+    mutate(sdwa_release = sdwa_release, sdwa_download_date = sdwa_download_date)
 
   missing_ids <- setdiff(requested_ids, final_results$wsd_source_id)
   if (length(missing_ids) > 0) {
@@ -418,7 +437,8 @@ calc_service_reach <- function(water_supplies,
     message(nrow(final_results), " sources returned (",
             sum(final_results$service_reach_reason == "Inactive in WSD"), " inactive in the WSD, ",
             sum(final_results$review_sdwa_inactive), " active in the WSD but not in SDWA); ",
-            sum(final_results$wide_reach), " Wide")
+            sum(final_results$wide_reach), " Wide; SDWA release ", sdwa_release,
+            " (downloaded ", sdwa_download_date, ")")
     end_time <- Sys.time()
     total_time <- end_time - start_time
     message("\nService reach processing completed in ",
@@ -430,6 +450,7 @@ calc_service_reach <- function(water_supplies,
       results = final_results,
       all_sources = all_results,
       settings = list(
+        sdwa_release = sdwa_release, sdwa_download_date = sdwa_download_date,
         tier_low_max = tier_low_max, tier_moderate_max = tier_moderate_max,
         assumed_pop_non_pws = assumed_pop_non_pws, assumed_pop_pws = assumed_pop_pws,
         secondary_share_min = secondary_share_min, park_vis_high = park_vis_high,
