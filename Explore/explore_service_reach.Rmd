@@ -15,7 +15,11 @@ knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
 ```{r calculate, include=FALSE}
 source("setup.R")
 
-water_supplies <- get_wsd(rapid = TRUE)
+# TEMPORARY: get_wsd(rapid = TRUE) doesn't drop the new "consecutive" source type yet
+# (park-run systems that buy piped water). Remove this filter once npswavacore's
+# get_wsd() excludes it along with municipal, hauled, tribal, and purchased.
+water_supplies <- get_wsd(rapid = TRUE) |>
+  dplyr::filter(coalesce(source_type, "") != "consecutive")
 all_conus <- get_wsd(conus = TRUE, fill_empty_coords = TRUE)
 
 reach <- calc_service_reach(water_supplies,
@@ -72,9 +76,8 @@ role_colors <- c("Primary" = "#8C2B0E", "Secondary" = "#CB7223", "Minor" = "#DFC
 # Map a column with fixed colors, dropping values that aren't present
 factor_map <- function(data, column, colors, label) {
   data[[column]] <- droplevels(factor(as.character(data[[column]]), levels = names(colors)))
-  mapview(data, zcol = column, layer.name = label, map.types = NULL,
-          col.regions = unname(colors[levels(data[[column]])])) |>
-    add_nps_basemaps()
+  mapview(data, zcol = column, layer.name = label, map.types = "Esri.WorldTopoMap",
+          col.regions = unname(colors[levels(data[[column]])]))
 }
 ```
 
@@ -139,28 +142,35 @@ results |>
 All CONUS sources come from `get_wsd(conus = TRUE, fill_empty_coords = TRUE)`, including
 municipal, purchased, and hauled supplies. Activity status comes from the WSD:
 
-- **Inactive or temporarily inactive in the WSD:** left out of every calculation, then
-  added back in Step 7 as "Not assessed", so every rapid source has a service reach.
-  A missing status counts as active.
+- **Inactive in the WSD** (out of use for roughly 5–10 years or more): left out of every
+  calculation, then added back in Step 7 as "Not assessed", so every rapid source has a
+  service reach.
+- **Temporarily inactive in the WSD** (recently or possibly temporarily closed): kept and
+  assessed like active sources. A missing status also counts as active.
 - **Active in the WSD, but the PWS isn't active in SDWA:** kept and assessed like any
   other active source, using SDWA's last reported population. These are listed under
   [Data clarification needed](#data-clarification-needed) so the two records can be
   reconciled.
 
 ```{r step1-counts}
-wsd_inactive <- all_conus_sources |> filter(coalesce(active, "active") != "active")
+wsd_inactive <- all_conus_sources |> filter(coalesce(active, "active") == "inactive")
+wsd_temp_inactive <- results_all |> filter(coalesce(active, "active") == "temporarily inactive")
 
 tibble(
   Step = c("All CONUS sources",
-           "Set aside: inactive or temporarily inactive in the WSD",
-           "Assessed: active in the WSD",
+           "Set aside: inactive in the WSD",
+           "Assessed: active or temporarily inactive in the WSD",
+           "  of which temporarily inactive in the WSD (kept)",
            "  of which the PWS isn't active in SDWA (kept, flagged)"),
-  Sources = c(nrow(all_conus_sources), nrow(wsd_inactive), nrow(results_all), nrow(sdwa_inactive)),
+  Sources = c(nrow(all_conus_sources), nrow(wsd_inactive), nrow(results_all),
+              nrow(wsd_temp_inactive), nrow(sdwa_inactive)),
   Parks = c(n_distinct(all_conus_sources$park_unit), n_distinct(wsd_inactive$park_unit),
-            n_distinct(results_all$park_unit), n_distinct(sdwa_inactive$park_unit)),
+            n_distinct(results_all$park_unit), n_distinct(wsd_temp_inactive$park_unit),
+            n_distinct(sdwa_inactive$park_unit)),
   `On rapid list` = c(sum(all_conus_sources$wsd_source_id %in% rapid_source_ids),
                       sum(wsd_inactive$wsd_source_id %in% rapid_source_ids),
                       sum(results_all$wsd_source_id %in% rapid_source_ids),
+                      sum(wsd_temp_inactive$wsd_source_id %in% rapid_source_ids),
                       sum(sdwa_inactive$wsd_source_id %in% rapid_source_ids))
 ) |>
   show_table()
@@ -168,8 +178,9 @@ tibble(
 
 ## Step 2: Rate scale from population served
 
-Population served is `POPULATION_SERVED_COUNT` from the SDWA public water system table,
-matched on PWS number. Sources with two PWS numbers use the active record, then the
+Population served is `POPULATION_SERVED_COUNT` from the SDWA public water system table
+(release `r sdwa_release`, downloaded `r sdwa_download_date`), saved by
+`process_sdwa_data()` and matched on PWS number. Sources with two PWS numbers use the active record, then the
 larger population. The first matching row sets each source's category:
 
 ```{r step2-rules}
@@ -177,7 +188,7 @@ tribble(
   ~Order, ~Category, ~Rule, ~`Population used`,
   1, "Proposed", "Classification is Proposed System", "None",
   2, "Non-potable", "Classification is Non-Potable (NonPOT)", "None",
-  3, "Municipal/purchased", "Municipal, purchased, hauled, or tribal source whose PWS isn't NPS-run", "None",
+  3, "Municipal/purchased", "Municipal, tribal, or purchased source, or hauled water whose PWS is the supplier's", "None",
   4, "Non-PWS", "Classification is Non-Public Water System, with no SDWA population", paste0(assumed_pop_non_pws, " (assumed)"),
   5, "Low", paste0("Population served of ", tier_low_max, " or less"), paste0("SDWA, or ", assumed_pop_pws, " (assumed) if the PWS number has no usable match"),
   6, "Moderate", paste0("Population served of ", tier_low_max + 1, " to ", fmt(tier_moderate_max)), "SDWA",
@@ -191,18 +202,18 @@ The `r tier_low_max` and `r fmt(tier_moderate_max)` breaks follow EPA's "very sm
 
 ### Municipal supplies
 
-In the WSD, a municipal, purchased, hauled, or tribal `source_type` means the water comes
-from outside the park, and `supplied_from` names the utility. The PWS number linked to
-the source shows who runs the distribution system:
+The WSD `source_type` decides whether the park runs the system that delivers the water:
 
-- **The utility's own system** (owned by a town, district, private utility, or another
-  agency): the park is one customer, so the source is Municipal/purchased and gets no
-  population.
-- **An NPS-run system** (federally owned, and the SDWA name isn't another agency such as
-  a Navy or Air Force base): the park buys water and distributes it itself, so SDWA's
-  population is the park's. It's rated like any park-run system.
-- **Hauled from another of the park's own systems** (`supplied_from` gives a WSD system
-  ID): this is park water, not an outside source.
+- **Physical source** (groundwater, spring, surface water, rainwater): park-run.
+- **Consecutive:** the park buys piped water from a utility and runs its own storage
+  and distribution under its own PWS. Park-run, and SDWA's population for that PWS is
+  the park's.
+- **Hauled:** delivered into park storage, so park-run. The exception is when
+  `pws_number` is the supplier's own PWS (its PWSID appears in `supplied_from`, or SDWA
+  lists a town or state owner); then it's treated like municipal water. Water hauled
+  from another park system (`supplied_from` gives a WSD system ID) is park water.
+- **Municipal, tribal, purchased/concessioner:** the park is a customer on the
+  supplier's system. Municipal/purchased, with no population.
 
 Municipal supplies get no population because SDWA reports the whole utility, as these
 examples show:
@@ -218,14 +229,15 @@ results_all |>
   show_table(caption = "Largest populations among municipal supplies")
 ```
 
-These NPS-run systems buy their water but keep their SDWA population. `get_wsd(rapid =
-TRUE)` drops every municipal source type, so none of them are on the rapid list, but they
-still count toward their park's roles in Step 4:
+These park-run systems buy or haul their water but keep their SDWA population.
+`get_wsd(rapid = TRUE)` drops these source types (consecutive is filtered out by hand
+until `get_wsd()` is updated), so none of them are on the rapid list, but they still
+count toward their park's roles in Step 4:
 
-```{r step2-nps-run}
+```{r step2-park-run-bought}
 results_all |>
-  filter(outside_source, nps_run_pws) |>
-  distinct(park_unit, pws_name, .keep_all = TRUE) |>
+  filter(outside_source, system_category != "Municipal/purchased") |>
+  distinct(park_unit, unit_id, .keep_all = TRUE) |>
   arrange(desc(population_estimate)) |>
   transmute(Park = park_unit,
             `SDWA system` = pws_name,
@@ -233,19 +245,20 @@ results_all |>
             `Supplied from` = supplied_from,
             Population = population_estimate,
             Category = system_category) |>
-  show_table(height = "350px", caption = "NPS-run systems that buy or haul water")
+  show_table(height = "350px", caption = "Park-run systems that buy or haul water")
 ```
 
-Federally owned systems run by other agencies are treated as municipal:
+Hauled water whose `pws_number` is the supplier's PWS is treated as municipal:
 
-```{r step2-other-agency}
+```{r step2-hauled-supplier}
 results_all |>
-  filter(outside_source, !nps_run_pws, owner_type_desc == "Federal Government") |>
-  distinct(park_unit, pws_name, .keep_all = TRUE) |>
+  filter(str_detect(coalesce(source_type, ""), "hauled"), system_category == "Municipal/purchased") |>
   transmute(Park = park_unit,
+            Source = wsd_source_id,
             `SDWA system` = pws_name,
+            Owner = owner_type_desc,
             `SDWA population` = population_served,
-            Category = system_category) |>
+            `Supplied from` = supplied_from) |>
   show_table()
 ```
 
@@ -511,18 +524,18 @@ results |>
 
 ### 2. SDWA population may not describe the park
 
-These are NPS-run systems that buy or haul water from outside the park, and non-federal
-community water systems listed as park-run. Their SDWA population may include people
-outside the park, such as a neighboring town or another agency's facility.
+These are park-run systems that buy or haul water from outside the park (consecutive or
+hauled), and non-federal community water systems listed as park-run. Their SDWA
+population may include people outside the park, such as a neighboring town or another
+agency's facility.
 
 **How to confirm:**
 
 - Check the PWS owner and service area in SDWA or the state viewer.
 - Ask the park whether the system also serves non-NPS users.
-- If an NPS-looking federal system is actually run by another agency, add that agency to
-  `non_nps_federal_pattern` in `calc_service_reach()`.
-- If it's a utility the park buys from, change `source_type` in the WSD to municipal or
-  purchased. It then moves to the Municipal/purchased category.
+- If the park is only a customer on the supplier's system, change `source_type` in the
+  WSD to municipal, tribal, or purchased/concessioner. It then moves to the
+  Municipal/purchased category.
 
 ```{r clarify-population-park}
 results |>
@@ -676,7 +689,7 @@ results |>
 
 ### 8. Active in the WSD but not in SDWA
 
-The WSD lists these sources as active, but their PWS isn't active in SDWA. They're kept
+The WSD lists these sources as active or temporarily inactive, but their PWS isn't active in SDWA. They're kept
 and assessed using SDWA's last reported population. Some may still be in use under a new
 PWS number, and others may need to be marked inactive in the WSD.
 
@@ -685,7 +698,8 @@ PWS number, and others may need to be marked inactive in the WSD.
 - Look up the PWS in SDWA or the state viewer for a deactivation date and reason.
 - Search SDWA for an active system with a similar name at the same park, which may be a
   replacement PWS number.
-- Update the WSD: either mark the source inactive or correct its `pws_number`.
+- Update the WSD: correct its `pws_number`, or mark the source temporarily inactive or
+  inactive (only `inactive` removes it from the assessment).
 
 ```{r clarify-inactive}
 sdwa_inactive |>
